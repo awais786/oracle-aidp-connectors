@@ -4,7 +4,7 @@ Read Jira Cloud issues into Spark on AIDP with `jira.py` (only `requests`).
 `jira.py` imports the sibling `connectors/_shared/` package (HTTP retry
 engine, credential resolution) — upload both to the same workspace folder.
 
-Setup: see the skill `skills/aidp-jira/SKILL.md` and the example notebook in `examples/`.
+Setup: see the example notebook in `examples/` and `LIVE_TEST_GUIDE.md`.
 Requirements and acceptance criteria: `REQUIREMENTS.md`. Verified API behaviour: `spike/RESULTS.md`.
 Live-test status: `live-results/RESULTS.md`. Not supported until a PASS row exists there.
 

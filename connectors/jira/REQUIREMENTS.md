@@ -92,7 +92,7 @@ Jira's search endpoint, pagination and rate-limit behaviour themselves.
 - A5. A caller JQL string containing `ORDER BY` raises before any request is
   sent. Verified by offline unit tests.
 - A6. The example notebook records a dated PASS row in `live-results/`, and
-  the gotchas found are written into the connector's README and skill. **Not
+  the gotchas found are written into the connector's README and CLAUDE.md. **Not
   yet done** — needs an actual AIDP cluster; see `LIVE_TEST_GUIDE.md`. A1–A3
   passing locally does not substitute for this: AIDP's credential store,
   cluster networking, and exact runtime versions remain unverified until this

@@ -2,6 +2,15 @@
 
 Date: 2026-09-28 · Status: draft for review
 
+**Update, 2026-09-29:** the Claude Code plugin/skill wrapper described below
+(`.claude-plugin/`, `skills/aidp-<source>/SKILL.md`) was built, then removed —
+no clear use case for it: the connectors run standalone (upload + notebook),
+and nothing about the actual data movement needs an LLM in the loop. This
+section is left as a historical record of what was built and why; treat
+every mention of "the plugin" or "the skill" below as no longer current. The
+rest of the design (connector layout, `_shared/`, definition of done,
+non-goals) is unaffected and still applies.
+
 ## Purpose
 
 `oracle-aidp-connectors` is an independent collection of **live-tested AIDP

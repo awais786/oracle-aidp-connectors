@@ -1,9 +1,14 @@
 # oracle-aidp-connectors: project instructions
 
 Independent Arbisoft project. Live-tested ingestion recipes for Oracle AI Data
-Platform (AIDP) Workbench, delivered as a Claude Code plugin. Not affiliated with
-or endorsed by Oracle. Read `docs/specs/2026-09-28-oracle-aidp-connectors-design.md`
+Platform (AIDP) Workbench: unit-tested Python helpers plus example notebooks,
+run standalone against a live AIDP workspace. Not affiliated with or endorsed
+by Oracle. Read `docs/specs/2026-09-28-oracle-aidp-connectors-design.md`
 before changing anything; it is the source of truth for scope and layout.
+
+No Claude Code plugin/skill wrapper is shipped at this time — it was removed;
+see the root `README.md`. Do not add `skills/` or `.claude-plugin/` back
+without discussing it first.
 
 ## Process
 
@@ -39,8 +44,8 @@ experimental and is not listed as supported.
   reason.
 - Label every technical claim about AIDP or a source system as **verified**
   (observed in a live run) or **unverified** (from memory or docs). Do not write
-  unverified claims into a skill as facts.
-- Keep skills thin. Logic lives in `connectors/<source>/` and is unit-tested.
+  unverified claims into docs as facts.
+- Logic lives in `connectors/<source>/` and is unit-tested, not in docs.
 - Unit tests are offline: no network, no Spark. Mock the transport.
 - Do not add a dependency the AIDP cluster does not already have unless the
   connector cannot work without it.

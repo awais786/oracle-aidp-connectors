@@ -1,6 +1,0 @@
-{
-  "name": "oracle-aidp-connectors",
-  "version": "0.1.0",
-  "description": "Live-tested ingestion recipes for Oracle AI Data Platform. Independent project by Arbisoft; not affiliated with Oracle.",
-  "author": {"name": "Arbisoft"}
-}

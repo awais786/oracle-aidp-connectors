@@ -106,7 +106,7 @@ Tell me:
 
 I'll record the result in `connectors/jira/live-results/` (a dated PASS if
 everything checked out, or NOT RUN with the reason if it didn't) and fold any
-new gotchas into the skill and docs — the same way the earlier live spike's
+new gotchas into the docs — the same way the earlier live spike's
 findings got written up.
 
 ## If something goes wrong
