@@ -13,7 +13,7 @@ notebook, using the REST API v3. No writes, no webhooks, no OAuth in v1.
 Credentials come only from environment variables (or the AIDP credential store
 once verified):
 
-- `JIRA_SITE`: site host, e.g. `awaisq.atlassian.net` (no scheme, no path)
+- `JIRA_SITE`: site host, e.g. `example.atlassian.net` (no scheme, no path)
 - `JIRA_EMAIL`: the Atlassian account email
 - `JIRA_API_TOKEN`: an API token from https://id.atlassian.com/manage/api-tokens
 

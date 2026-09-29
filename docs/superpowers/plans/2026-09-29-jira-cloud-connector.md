@@ -119,26 +119,26 @@ import jira as j
 
 
 def test_normalize_site_strips_scheme_and_trailing_slash():
-    assert j.normalize_site("https://awaisq.atlassian.net/") == "awaisq.atlassian.net"
-    assert j.normalize_site("HTTP://awaisq.atlassian.net") == "awaisq.atlassian.net"
-    assert j.normalize_site("  awaisq.atlassian.net  ") == "awaisq.atlassian.net"
+    assert j.normalize_site("https://example.atlassian.net/") == "example.atlassian.net"
+    assert j.normalize_site("HTTP://example.atlassian.net") == "example.atlassian.net"
+    assert j.normalize_site("  example.atlassian.net  ") == "example.atlassian.net"
 
 
-@pytest.mark.parametrize("bad", ["", "   ", "https://", "awaisq.atlassian.net/jira", "a b"])
+@pytest.mark.parametrize("bad", ["", "   ", "https://", "example.atlassian.net/jira", "a b"])
 def test_normalize_site_rejects_bad_values(bad):
     with pytest.raises(ValueError):
         j.normalize_site(bad)
 
 
 def test_credentials_from_env_returns_site_email_token(monkeypatch):
-    monkeypatch.setenv("JIRA_SITE", "https://awaisq.atlassian.net/")
+    monkeypatch.setenv("JIRA_SITE", "https://example.atlassian.net/")
     monkeypatch.setenv("JIRA_EMAIL", "me@example.com")
     monkeypatch.setenv("JIRA_API_TOKEN", "tok3n")
-    assert j.credentials_from_env() == ("awaisq.atlassian.net", "me@example.com", "tok3n")
+    assert j.credentials_from_env() == ("example.atlassian.net", "me@example.com", "tok3n")
 
 
 def test_credentials_from_env_names_the_missing_variable_only(monkeypatch):
-    monkeypatch.setenv("JIRA_SITE", "awaisq.atlassian.net")
+    monkeypatch.setenv("JIRA_SITE", "example.atlassian.net")
     monkeypatch.setenv("JIRA_EMAIL", "me@example.com")
     monkeypatch.delenv("JIRA_API_TOKEN", raising=False)
     with pytest.raises(j.JiraError) as exc:
@@ -264,14 +264,14 @@ This task produces facts, not shipped code. `probe.py` is throwaway and labelled
 
 - [ ] **Step 1: Get the gates (manual, not code)**
 
-1. Confirm a Jira Cloud site exists (already have one: `awaisq.atlassian.net`, project `KAN`) and an API token from `id.atlassian.com/manage/api-tokens`.
+1. Confirm a Jira Cloud site exists (already have one: `example.atlassian.net`, project `KAN`) and an API token from `id.atlassian.com/manage/api-tokens`.
 2. Read Oracle's AIDP connector documentation and confirm there is no native `aidataplatform` type for Jira. If there is one, stop and revise the spec and requirements.
 3. Confirm you can open a notebook on a running AIDP cluster.
 
 Write `.env` at the repo root (already gitignored):
 
 ```
-JIRA_SITE=awaisq.atlassian.net
+JIRA_SITE=example.atlassian.net
 JIRA_EMAIL=<your Atlassian account email>
 JIRA_API_TOKEN=<the API token>
 ```
@@ -420,7 +420,7 @@ Create `connectors/jira/spike/RESULTS.md` by pasting the probe output under thes
 ```markdown
 # Jira Cloud API spike results
 
-Date: <YYYY-MM-DD> · Site: awaisq.atlassian.net (host not otherwise recorded) · Run from: laptop
+Date: <YYYY-MM-DD> · Site: example.atlassian.net (host not otherwise recorded) · Run from: laptop
 
 ## Q1 search/jql shape and paging
 Probe output: <paste Q1 lines>
@@ -589,7 +589,7 @@ import pytest
 import jira as j
 from fakes import FakeResponse, FakeSession
 
-URL = "https://awaisq.atlassian.net/rest/api/3/search/jql"
+URL = "https://example.atlassian.net/rest/api/3/search/jql"
 
 
 def test_returns_json_and_passes_timeout():
@@ -795,7 +795,7 @@ def keys(rows):
 def run(session, **kw):
     kw.setdefault("until", UNTIL)
     kw.setdefault("sleep", lambda s: None)
-    return list(j.search_issues(session, "awaisq.atlassian.net", **kw))
+    return list(j.search_issues(session, "example.atlassian.net", **kw))
 
 
 def test_pages_through_every_issue_exactly_once():
@@ -859,7 +859,7 @@ def test_since_minus_overlap_is_the_lower_bound():
 def test_default_upper_bound_comes_from_injected_clock_once():
     session = FakeSearch([{"issues": [], "isLast": True, "nextPageToken": None}])
     list(j.search_issues(
-        session, "awaisq.atlassian.net", page_size=10,
+        session, "example.atlassian.net", page_size=10,
         now=lambda: datetime(2026, 9, 28, 12, 0, 0),
     ))
     assert 'updated <= "2026-09-28 12:00"' in session.calls[0]["json"]["jql"]
@@ -869,7 +869,7 @@ def test_request_body_shape_and_field_list_always_includes_key_and_updated():
     session = FakeSearch([{"issues": [], "isLast": True, "nextPageToken": None}])
     run(session, fields=["summary", "status"], page_size=25, timeout=9)
     call = session.calls[0]
-    assert call["url"] == "https://awaisq.atlassian.net/rest/api/3/search/jql"
+    assert call["url"] == "https://example.atlassian.net/rest/api/3/search/jql"
     assert call["json"]["maxResults"] == 25
     assert call["json"]["fields"] == ["key", "updated", "summary", "status"]
     assert "nextPageToken" not in call["json"]
@@ -888,8 +888,8 @@ def test_second_page_includes_next_page_token():
 
 def test_site_with_scheme_is_normalised():
     session = FakeSearch([{"issues": [], "isLast": True, "nextPageToken": None}])
-    list(j.search_issues(session, "https://awaisq.atlassian.net/", until=UNTIL))
-    assert session.calls[0]["url"].startswith("https://awaisq.atlassian.net/rest/api/3/")
+    list(j.search_issues(session, "https://example.atlassian.net/", until=UNTIL))
+    assert session.calls[0]["url"].startswith("https://example.atlassian.net/rest/api/3/")
 
 
 @pytest.mark.parametrize("kwargs", [

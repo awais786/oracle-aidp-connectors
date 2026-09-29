@@ -1,6 +1,21 @@
 # Jira Cloud API spike results
 
-Date: 2026-09-29 · Site: awaisq.atlassian.net (host not otherwise recorded) · Run from: laptop
+Date: 2026-09-29 · Site: `<site>.atlassian.net` (placeholder — real host never
+recorded here or anywhere else in this repo) · Run from: laptop
+
+## G0 (repo-wide gate) — native AIDP connector type check
+
+**Checked 2026-09-29.** Oracle's `oracle-ai-data-platform-workbench-spark-connectors`
+plugin README lists 26 `aidataplatform`/native connector types (Oracle/OCI
+sources, external RDBMS, SaaS: Salesforce, NetSuite, Snowflake, and
+multi-cloud/escape-hatch connectors). Jira is not among them. A general web
+search summarizing the same `aidataplatform` type list agrees. Oracle's own
+blog post on "bringing external data into AI Data Platform Workbench" could
+not be fetched directly (HTTP 403) to double-check against the canonical
+source. **Confidence: reasonably high but not certain** — this is two
+secondary sources agreeing, not a direct read of Oracle's documentation.
+Decision: proceed with the REST-based connector as designed; if a native type
+ever surfaces, revisit per the spec's stated rule (native type wins).
 
 ## Q1 search/jql shape and paging
 
@@ -65,10 +80,22 @@ Q3 utc_now: 2026-09-29T04:46:16
 - **Timestamps are NOT UTC.** `updated` came back as
   `2026-09-28T19:32:13.094+0500` — a +05:00 offset, not `+0000`. The format
   `%Y-%m-%dT%H:%M:%S.%f%z` parses this correctly regardless of which offset is
-  present (Python's `%z` accepts any `+HHMM`/`-HHMM` offset, and aware-datetime
-  comparisons are offset-independent), so **no code change is required** in
-  `_parse_jira_timestamp` — but the design's original assumption of a UTC
-  offset was wrong and is corrected here for anyone reading the skill later.
+  present, so *reading* a timestamp needed no code change.
+
+  **Correction (post-review, 2026-09-29): the original note that "no code
+  change is required" was wrong and has been fixed.** It only checked how
+  Jira *returns* timestamps; it never checked how Jira *interprets* the JQL
+  date-time literals `search_issues` *sends* for the watermark bounds. Jira
+  compares those literals in the searching account's own timezone (per
+  `/rest/api/3/myself`'s `timeZone` field), not UTC. Sending a UTC-formatted
+  bound to an account not on UTC silently shifts the effective watermark by
+  the account's offset — for an account ahead of UTC this drops the most
+  recent hours from a full load; for an account behind UTC this **silently
+  and permanently skips** issues updated in the gap. Fixed: `jira.py` now has
+  `account_timezone()`, and `format_jql_timestamp`/`build_jql`/`search_issues`
+  take an explicit `tz`/`tz_name` parameter that the notebook fetches and
+  passes on every run. See `CLAUDE.md` and the design spec for the corrected
+  description.
 
 ## Q4 invalid JQL
 
@@ -85,20 +112,20 @@ in the raised `JiraError` for any 4xx/5xx status — no code change needed.
 ## Q5 custom fields
 
 Custom field key pattern confirmed: `customfield_NNNNN` (5-digit numeric ID).
-Sample from this site: `customfield_10001`, `customfield_10015`,
-`customfield_10017`, `customfield_10019`, `customfield_10021`,
-`customfield_10026` (6 total). The shipped connector does not surface custom
-fields by default (`TYPED_FIELDS` covers only common fields); a caller who
-needs one passes its `customfield_NNNNN` key via the `fields` argument to
-`search_issues`, and it will appear in the raw `issue["fields"]` dict — but
-`to_dataframe`/`normalize_issue` in this v1 do not have a typed column for it
-and will silently drop it, since `normalize_issue` only reads names in
-`TYPED_FIELDS`. **This is a real v1 limitation to document in the skill's
-gotchas**, not something this spike needs to fix.
+Sample from this site: 6 custom fields present (keys withheld here since they
+are specific to the test site; the pattern is what matters). The shipped
+connector does not surface custom fields in a typed column (`TYPED_FIELDS`
+covers only common fields); a caller who needs one passes its
+`customfield_NNNNN` key via the `fields` argument to `search_issues`. As of
+the post-review fix, any requested field not in `TYPED_FIELDS` — including
+custom fields — is preserved in a `raw_fields` JSON-string column rather than
+silently dropped (see `CLAUDE.md`).
 
 ## Decision
 
-**Proceed: search/jql pagination verified.** Continuing to Tasks 5 and 6 with
-one addition to the skill's documented gotchas (unbounded-query rejection,
-non-UTC timestamps, custom fields silently dropped from typed output) and no
-changes to the paging or timestamp-parsing code already written in Tasks 3–4.
+**Proceed: search/jql pagination verified.** Two defects were found after this
+spike by a whole-branch code review, both since fixed: (1) the shipped
+notebook only requested `key`+`updated`, leaving every other typed column
+null — `search_issues` now defaults to every `TYPED_FIELDS` name when the
+caller passes no `fields=`; (2) the timezone finding above. See the design
+spec's Jira Cloud connector section for the corrected, current description.

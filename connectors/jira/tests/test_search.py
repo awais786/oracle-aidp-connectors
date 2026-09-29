@@ -19,7 +19,7 @@ def keys(rows):
 def run(session, **kw):
     kw.setdefault("until", UNTIL)
     kw.setdefault("sleep", lambda s: None)
-    return list(j.search_issues(session, "awaisq.atlassian.net", **kw))
+    return list(j.search_issues(session, "example.atlassian.net", **kw))
 
 
 def test_pages_through_every_issue_exactly_once():
@@ -83,7 +83,7 @@ def test_since_minus_overlap_is_the_lower_bound():
 def test_default_upper_bound_comes_from_injected_clock_once():
     session = FakeSearch([{"issues": [], "isLast": True, "nextPageToken": None}])
     list(j.search_issues(
-        session, "awaisq.atlassian.net", page_size=10,
+        session, "example.atlassian.net", page_size=10,
         now=lambda: datetime(2026, 9, 28, 12, 0, 0),
     ))
     assert 'updated <= "2026-09-28 12:00"' in session.calls[0]["json"]["jql"]
@@ -93,7 +93,7 @@ def test_request_body_shape_and_field_list_always_includes_key_and_updated():
     session = FakeSearch([{"issues": [], "isLast": True, "nextPageToken": None}])
     run(session, fields=["summary", "status"], page_size=25, timeout=9)
     call = session.calls[0]
-    assert call["url"] == "https://awaisq.atlassian.net/rest/api/3/search/jql"
+    assert call["url"] == "https://example.atlassian.net/rest/api/3/search/jql"
     assert call["json"]["maxResults"] == 25
     assert call["json"]["fields"] == ["key", "updated", "summary", "status"]
     assert "nextPageToken" not in call["json"]
@@ -149,8 +149,8 @@ def test_second_page_includes_next_page_token():
 
 def test_site_with_scheme_is_normalised():
     session = FakeSearch([{"issues": [], "isLast": True, "nextPageToken": None}])
-    list(j.search_issues(session, "https://awaisq.atlassian.net/", until=UNTIL))
-    assert session.calls[0]["url"].startswith("https://awaisq.atlassian.net/rest/api/3/")
+    list(j.search_issues(session, "https://example.atlassian.net/", until=UNTIL))
+    assert session.calls[0]["url"].startswith("https://example.atlassian.net/rest/api/3/")
 
 
 @pytest.mark.parametrize("kwargs", [

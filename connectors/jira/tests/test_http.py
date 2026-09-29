@@ -3,7 +3,7 @@ import pytest
 import jira as j
 from fakes import FakeResponse, FakeSession
 
-URL = "https://awaisq.atlassian.net/rest/api/3/search/jql"
+URL = "https://example.atlassian.net/rest/api/3/search/jql"
 
 
 def test_returns_json_and_passes_timeout():
