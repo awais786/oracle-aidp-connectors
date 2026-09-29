@@ -11,6 +11,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Iterator, Tuple
+from zoneinfo import ZoneInfo
 
 ENV_SITE = "JIRA_SITE"
 ENV_EMAIL = "JIRA_EMAIL"
@@ -72,24 +73,35 @@ def redact(text: str, *secrets: str) -> str:
 _FORBIDDEN_IN_QUERY = re.compile(r"order\s+by", re.I)
 
 
-def format_jql_timestamp(value: datetime) -> str:
-    """UTC ``YYYY-MM-DD HH:MM`` (JQL date-time literal). Naive == UTC."""
-    if value.tzinfo is not None:
-        value = value.astimezone(timezone.utc)
-    return value.strftime("%Y-%m-%d %H:%M")
+def format_jql_timestamp(value: datetime, tz=timezone.utc) -> str:
+    """``YYYY-MM-DD HH:MM`` in ``tz`` (JQL date-time literal).
+
+    Jira interprets a JQL date-time literal in the *searching account's own*
+    timezone, not UTC — pass the account's zone (see ``account_timezone()``) as
+    ``tz``, not just the default. A naive ``value`` is treated as already being
+    in UTC before conversion to ``tz``.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(tz).strftime("%Y-%m-%d %H:%M")
 
 
-def build_jql(*, since=None, until=None, query=None) -> str:
-    """JQL for one search. Caller query is ANDed with the watermark window."""
+def build_jql(*, since=None, until=None, query=None, tz=timezone.utc) -> str:
+    """JQL for one search. Caller query is ANDed with the watermark window.
+
+    ``tz`` must be the searching account's own timezone (``account_timezone()``)
+    for the bounds to mean what they say; the default UTC is only correct for
+    an account whose Jira profile timezone is UTC.
+    """
     if query and _FORBIDDEN_IN_QUERY.search(query):
         raise ValueError("query must not contain ORDER BY; paging adds its own ordering")
     parts = []
     if query:
         parts.append("(%s)" % query.strip())
     if since is not None:
-        parts.append('updated >= "%s"' % format_jql_timestamp(since))
+        parts.append('updated >= "%s"' % format_jql_timestamp(since, tz))
     if until is not None:
-        parts.append('updated <= "%s"' % format_jql_timestamp(until))
+        parts.append('updated <= "%s"' % format_jql_timestamp(until, tz))
     parts.append("ORDER BY updated ASC, key ASC")
     return " AND ".join(parts[:-1]) + (" " if parts[:-1] else "") + parts[-1]
 
@@ -105,11 +117,11 @@ def _retry_after_seconds(response, fallback: float) -> float:
         return fallback
 
 
-def post_json(session, url, body, *, timeout=60, max_retries=5, sleep=time.sleep) -> dict:
-    """POST ``body`` to ``url`` and return the parsed JSON, with bounded 429 retries."""
+def _request_json(make_request, *, max_retries=5, sleep=time.sleep) -> dict:
+    """Shared 429/auth/error/JSON handling for one GET or POST call."""
     attempt = 0
     while True:
-        response = session.post(url, json=body, timeout=timeout)
+        response = make_request()
         status = response.status_code
         if status == 429:
             if attempt >= max_retries:
@@ -125,12 +137,45 @@ def post_json(session, url, body, *, timeout=60, max_retries=5, sleep=time.sleep
             )
         if status >= 400:
             raise JiraError(
-                "HTTP {} from the Jira search API: {}".format(status, _safe_body(response))
+                "HTTP {} from the Jira API: {}".format(status, _safe_body(response))
             )
         try:
             return response.json()
         except ValueError:
             raise JiraError("response was not JSON; check the site name and URL") from None
+
+
+def post_json(session, url, body, *, timeout=60, max_retries=5, sleep=time.sleep) -> dict:
+    """POST ``body`` to ``url`` and return the parsed JSON, with bounded 429 retries."""
+    return _request_json(
+        lambda: session.post(url, json=body, timeout=timeout),
+        max_retries=max_retries, sleep=sleep,
+    )
+
+
+def get_json(session, url, *, timeout=60, max_retries=5, sleep=time.sleep) -> dict:
+    """GET ``url`` and return the parsed JSON, with the same retry/error handling as post_json."""
+    return _request_json(
+        lambda: session.get(url, timeout=timeout),
+        max_retries=max_retries, sleep=sleep,
+    )
+
+
+def account_timezone(session, site, *, timeout=60, max_retries=5, sleep=time.sleep) -> str:
+    """The searching account's IANA timezone name, from GET /rest/api/3/myself.
+
+    Jira interprets JQL date-time literals in this timezone, not UTC. Fetch it
+    once and pass it to ``search_issues(..., tz_name=...)`` — there is no safe
+    automatic default, since assuming UTC silently skips or delays issues for
+    any account whose Jira profile timezone is not UTC.
+    """
+    host = normalize_site(site)
+    url = "https://{}/rest/api/3/myself".format(host)
+    payload = get_json(session, url, timeout=timeout, max_retries=max_retries, sleep=sleep)
+    tz_name = payload.get("timeZone")
+    if not tz_name:
+        raise JiraError("account profile response has no timeZone field")
+    return tz_name
 
 
 def _safe_body(response) -> str:
@@ -153,6 +198,7 @@ def search_issues(
     overlap_seconds=300,
     until=None,
     page_size=100,
+    tz_name=None,
     timeout=60,
     max_retries=5,
     sleep=time.sleep,
@@ -164,6 +210,12 @@ def search_issues(
     offset. ``until`` is fixed at the first request, so issues updated during the
     read fall into the next run. Pass the same ``until`` as the next call's
     ``since``. De-duplicate on issue ``key``.
+
+    ``tz_name`` is the searching account's IANA timezone name (from
+    ``account_timezone(session, site)``), e.g. ``"Asia/Karachi"``. Jira compares
+    the JQL watermark bounds in that timezone, not UTC. Omitting it defaults to
+    UTC, which silently skips or delays issues for any account not on UTC —
+    pass it explicitly for a correct incremental load.
     """
     if not 1 <= page_size <= MAX_PAGE_SIZE:
         raise ValueError("page_size must be between 1 and {}".format(MAX_PAGE_SIZE))
@@ -173,8 +225,13 @@ def search_issues(
     url = "https://{}/rest/api/3/search/jql".format(host)
     upper = until if until is not None else (now() if now else datetime.now(timezone.utc))
     lower = since - timedelta(seconds=overlap_seconds) if since is not None else None
-    field_list = list(dict.fromkeys(["key", "updated", *(fields or [])]))
-    jql = build_jql(since=lower, until=upper, query=query)
+    tz = ZoneInfo(tz_name) if tz_name else timezone.utc
+    # Default to every typed column, not just key+updated — a caller who passes
+    # no fields= must still get summary/status/etc. populated in to_dataframe.
+    if fields is None:
+        fields = [name for name, _ in TYPED_FIELDS if name not in ("key", "updated")]
+    field_list = list(dict.fromkeys(["key", "updated", *fields]))
+    jql = build_jql(since=lower, until=upper, query=query, tz=tz)
 
     token = None
     seen_tokens = set()

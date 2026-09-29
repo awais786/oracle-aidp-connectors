@@ -100,6 +100,43 @@ def test_request_body_shape_and_field_list_always_includes_key_and_updated():
     assert call["timeout"] == 9
 
 
+def test_tz_name_shifts_the_watermark_bounds_into_that_timezone():
+    # Jira interprets JQL date-time literals in the account's own timezone, not
+    # UTC. since/until are given as UTC instants; with tz_name="Asia/Karachi"
+    # (+05:00, no DST) the JQL literals must be shifted forward five hours so
+    # Jira reads them as meaning the same UTC instants.
+    session = FakeSearch([{"issues": [], "isLast": True, "nextPageToken": None}])
+    run(
+        session,
+        since=datetime(2026, 9, 28, 5, 0, 0, tzinfo=None),
+        until=datetime(2026, 9, 28, 12, 0, 0, tzinfo=None),
+        overlap_seconds=0,
+        tz_name="Asia/Karachi",
+    )
+    jql = session.calls[0]["json"]["jql"]
+    assert 'updated >= "2026-09-28 10:00"' in jql
+    assert 'updated <= "2026-09-28 17:00"' in jql
+
+
+def test_no_tz_name_defaults_to_utc_bounds():
+    session = FakeSearch([{"issues": [], "isLast": True, "nextPageToken": None}])
+    run(session, since=datetime(2026, 9, 28, 10, 0, 0), overlap_seconds=0)
+    jql = session.calls[0]["json"]["jql"]
+    assert 'updated >= "2026-09-28 10:00"' in jql
+    assert 'updated <= "2026-09-28 12:00"' in jql
+
+
+def test_default_fields_request_every_typed_column_not_just_key_and_updated():
+    # A caller who passes no fields= must still get summary/status/etc. populated
+    # in to_dataframe; requesting only key+updated silently nulls every other
+    # typed column (the bug the notebook shipped with).
+    session = FakeSearch([{"issues": [], "isLast": True, "nextPageToken": None}])
+    run(session, page_size=10)
+    requested = session.calls[0]["json"]["fields"]
+    for name, _ in j.TYPED_FIELDS:
+        assert name in requested, "TYPED_FIELDS column %r not requested by default" % name
+
+
 def test_second_page_includes_next_page_token():
     pages = [
         {"issues": [make_issue(1)], "isLast": False, "nextPageToken": "abc"},
