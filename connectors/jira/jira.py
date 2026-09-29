@@ -195,3 +195,54 @@ def search_issues(
             raise JiraError("paging did not advance; the server repeated a nextPageToken")
         seen_tokens.add(next_token)
         token = next_token
+
+
+_TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%S.%f%z"
+
+TYPED_FIELDS = [
+    ("key", "STRING"), ("summary", "STRING"), ("status", "STRING"),
+    ("priority", "STRING"), ("assignee", "STRING"), ("reporter", "STRING"),
+    ("issuetype", "STRING"), ("project", "STRING"),
+    ("created", "TIMESTAMP"), ("updated", "TIMESTAMP"),
+]
+
+_NAME_FIELDS = {"status", "priority", "issuetype"}
+_PERSON_FIELDS = {"assignee", "reporter"}
+
+
+def _parse_jira_timestamp(name, text):
+    try:
+        return datetime.strptime(text, _TIMESTAMP_FORMAT)
+    except (TypeError, ValueError):
+        raise JiraError("field {} is not a Jira timestamp".format(name)) from None
+
+
+def normalize_issue(issue: dict):
+    """One issue as a tuple following TYPED_FIELDS order."""
+    fields = issue.get("fields") or {}
+    out = []
+    for name, sql_type in TYPED_FIELDS:
+        if name == "key":
+            out.append(issue.get("key"))
+            continue
+        value = fields.get(name)
+        if value is None:
+            out.append(None)
+        elif name in _NAME_FIELDS:
+            out.append(value.get("name"))
+        elif name in _PERSON_FIELDS:
+            out.append(value.get("displayName"))
+        elif name == "project":
+            out.append(value.get("key"))
+        elif sql_type == "TIMESTAMP":
+            out.append(_parse_jira_timestamp(name, value))
+        else:
+            out.append(value)
+    return tuple(out)
+
+
+def to_dataframe(spark, issues):
+    """A Spark DataFrame with one typed column per TYPED_FIELDS entry."""
+    ddl = ", ".join("{} {}".format(n, t) for n, t in TYPED_FIELDS)
+    data = [normalize_issue(i) for i in issues]
+    return spark.createDataFrame(data, schema=ddl)
