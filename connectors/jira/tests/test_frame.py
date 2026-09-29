@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -15,7 +16,8 @@ class FakeSpark:
 
 
 def as_dict(tup):
-    return dict(zip([name for name, _ in j.TYPED_FIELDS], tup))
+    names = [name for name, _ in j.TYPED_FIELDS] + ["raw_fields"]
+    return dict(zip(names, tup))
 
 
 def test_normalize_issue_follows_field_order_and_unwraps_nested_objects():
@@ -72,3 +74,34 @@ def test_to_dataframe_with_no_issues_still_passes_the_schema():
     data, ddl = spark.calls[0]
     assert data == []
     assert "summary STRING" in ddl
+
+
+def test_extra_requested_fields_not_in_typed_fields_are_preserved_as_raw_fields_json():
+    # A custom field (or any field beyond TYPED_FIELDS) must not be silently
+    # dropped — it is preserved as JSON so a downstream query can still reach it.
+    issue = {
+        "key": "KAN-1",
+        "fields": {
+            "summary": "Fix the thing",
+            "customfield_10019": "Sprint 4",
+            "customfield_10021": {"value": "High"},
+        },
+    }
+    out = as_dict(j.normalize_issue(issue))
+    assert out["summary"] == "Fix the thing"
+    raw = json.loads(out["raw_fields"])
+    assert raw == {"customfield_10019": "Sprint 4", "customfield_10021": {"value": "High"}}
+
+
+def test_raw_fields_is_none_when_nothing_extra_was_requested():
+    issue = {"key": "KAN-2", "fields": {"summary": "x"}}
+    out = as_dict(j.normalize_issue(issue))
+    assert out["raw_fields"] is None
+
+
+def test_to_dataframe_ddl_includes_raw_fields_column():
+    spark = FakeSpark()
+    j.to_dataframe(spark, [{"key": "KAN-1", "fields": {}}])
+    data, ddl = spark.calls[0]
+    assert "raw_fields STRING" in ddl
+    assert len(data[0]) == len(j.TYPED_FIELDS) + 1

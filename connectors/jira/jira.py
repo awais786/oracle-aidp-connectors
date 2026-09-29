@@ -6,6 +6,7 @@ and are never logged. See connectors/jira/REQUIREMENTS.md.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -207,9 +208,17 @@ def search_issues(
     """Yield every issue matching ``query`` and updated within a fixed window.
 
     Pages via the server's opaque ``nextPageToken``; never builds or assumes an
-    offset. ``until`` is fixed at the first request, so issues updated during the
-    read fall into the next run. Pass the same ``until`` as the next call's
-    ``since``. De-duplicate on issue ``key``.
+    offset. ``until`` is fixed at the first request (default: now), so issues
+    updated during the read fall into the next run rather than this one.
+
+    The recommended watermark contract, used by the example notebook: after
+    writing the result, read ``MAX(updated)`` back from the target table and
+    pass it as the next run's ``since`` — this needs no extra state beyond the
+    table itself. Passing this call's ``until`` as the next call's ``since`` is
+    an equally correct alternative for a caller that already tracks it, since
+    both name the same instant; pick one contract per caller and be
+    consistent. De-duplicate on issue ``key`` either way, since the overlap
+    window re-reads a few issues on purpose.
 
     ``tz_name`` is the searching account's IANA timezone name (from
     ``account_timezone(session, site)``), e.g. ``"Asia/Karachi"``. Jira compares
@@ -275,7 +284,9 @@ def _parse_jira_timestamp(name, text):
 
 
 def normalize_issue(issue: dict):
-    """One issue as a tuple following TYPED_FIELDS order."""
+    """One issue as a tuple following TYPED_FIELDS order, plus a trailing
+    ``raw_fields`` JSON string holding any requested field not in TYPED_FIELDS
+    (e.g. a custom field) — never silently dropped."""
     fields = issue.get("fields") or {}
     out = []
     for name, sql_type in TYPED_FIELDS:
@@ -295,11 +306,16 @@ def normalize_issue(issue: dict):
             out.append(_parse_jira_timestamp(name, value))
         else:
             out.append(value)
+    typed_names = {name for name, _ in TYPED_FIELDS}
+    extra = {k: v for k, v in fields.items() if k not in typed_names}
+    out.append(json.dumps(extra, sort_keys=True, ensure_ascii=False) if extra else None)
     return tuple(out)
 
 
 def to_dataframe(spark, issues):
-    """A Spark DataFrame with one typed column per TYPED_FIELDS entry."""
+    """A Spark DataFrame: one typed column per TYPED_FIELDS entry, plus a
+    trailing ``raw_fields`` JSON-string column for any other requested field."""
     ddl = ", ".join("{} {}".format(n, t) for n, t in TYPED_FIELDS)
+    ddl += ", raw_fields STRING"
     data = [normalize_issue(i) for i in issues]
     return spark.createDataFrame(data, schema=ddl)
