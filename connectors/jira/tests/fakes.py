@@ -24,6 +24,10 @@ class FakeSession:
         self.calls.append({"url": url, "json": json, "timeout": timeout})
         return self._responses.pop(0)
 
+    def get(self, url, timeout=None):
+        self.calls.append({"url": url, "timeout": timeout})
+        return self._responses.pop(0)
+
 
 class FakeSearch:
     """Serves pre-built /search/jql response pages in order, by call count.
