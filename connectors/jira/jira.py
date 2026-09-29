@@ -9,8 +9,8 @@ from __future__ import annotations
 import os
 import re
 import time
-from datetime import datetime, timezone
-from typing import Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Iterator, Tuple
 
 ENV_SITE = "JIRA_SITE"
 ENV_EMAIL = "JIRA_EMAIL"
@@ -138,3 +138,60 @@ def _safe_body(response) -> str:
         return str(response.json())[:300]
     except ValueError:
         return "<non-JSON body>"
+
+
+MAX_PAGE_SIZE = 5000
+
+
+def search_issues(
+    session,
+    site,
+    *,
+    query=None,
+    fields=None,
+    since=None,
+    overlap_seconds=300,
+    until=None,
+    page_size=100,
+    timeout=60,
+    max_retries=5,
+    sleep=time.sleep,
+    now=None,
+) -> Iterator[dict]:
+    """Yield every issue matching ``query`` and updated within a fixed window.
+
+    Pages via the server's opaque ``nextPageToken``; never builds or assumes an
+    offset. ``until`` is fixed at the first request, so issues updated during the
+    read fall into the next run. Pass the same ``until`` as the next call's
+    ``since``. De-duplicate on issue ``key``.
+    """
+    if not 1 <= page_size <= MAX_PAGE_SIZE:
+        raise ValueError("page_size must be between 1 and {}".format(MAX_PAGE_SIZE))
+    build_jql(query=query)  # validates the caller's query before any request
+
+    host = normalize_site(site)
+    url = "https://{}/rest/api/3/search/jql".format(host)
+    upper = until if until is not None else (now() if now else datetime.now(timezone.utc))
+    lower = since - timedelta(seconds=overlap_seconds) if since is not None else None
+    field_list = list(dict.fromkeys(["key", "updated", *(fields or [])]))
+    jql = build_jql(since=lower, until=upper, query=query)
+
+    token = None
+    seen_tokens = set()
+    while True:
+        body = {"jql": jql, "fields": field_list, "maxResults": page_size}
+        if token is not None:
+            body["nextPageToken"] = token
+        payload = post_json(
+            session, url, body, timeout=timeout, max_retries=max_retries, sleep=sleep
+        )
+        yield from payload.get("issues", [])
+        if payload.get("isLast"):
+            return
+        next_token = payload.get("nextPageToken")
+        if not next_token:
+            raise JiraError("server did not report isLast but returned no nextPageToken")
+        if next_token in seen_tokens:
+            raise JiraError("paging did not advance; the server repeated a nextPageToken")
+        seen_tokens.add(next_token)
+        token = next_token
