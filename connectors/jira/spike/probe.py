@@ -22,7 +22,10 @@ def call(**body):
     return SESSION.post(URL, json=body, timeout=60)
 
 
-def q1_shape_and_paging(jql="order by updated asc", page=3, max_pages=200):
+BOUND = 'updated >= "2000-01-01 00:00"'  # Jira rejects a truly unbounded JQL query
+
+
+def q1_shape_and_paging(jql=BOUND + " order by updated asc", page=3, max_pages=200):
     seen, token, pages = [], None, 0
     prev_token = object()
     while pages < max_pages:
@@ -51,9 +54,10 @@ def q1_shape_and_paging(jql="order by updated asc", page=3, max_pages=200):
 
 
 def q2_max_results():
-    r = call(jql="order by updated asc", maxResults=10000, fields=["key"])
-    body = r.json() if r.status_code == 200 else {}
-    print("Q2 requested=10000 status=%d returned=%d" % (r.status_code, len(body.get("issues", []))))
+    for n in (5000, 5001):
+        r = call(jql=BOUND + " order by updated asc", maxResults=n, fields=["key"])
+        print("Q2 requested=%d status=%d body=%s" % (n, r.status_code, r.text[:150]))
+    r = call(jql=BOUND + " order by updated asc", maxResults=1, fields=["key"])
     interesting = sorted(
         (k, v) for k, v in r.headers.items()
         if k.lower().startswith(("x-ratelimit", "retry-after"))
@@ -62,7 +66,7 @@ def q2_max_results():
 
 
 def q3_field_shapes():
-    r = call(jql="order by updated desc", maxResults=1,
+    r = call(jql=BOUND + " order by updated desc", maxResults=1,
              fields=["key", "assignee", "reporter", "updated", "created", "status", "priority"])
     if r.status_code != 200 or not r.json().get("issues"):
         print("Q3 FAIL or no issues:", r.status_code)
@@ -82,7 +86,7 @@ def q4_invalid_jql():
 
 
 def q5_custom_fields():
-    r = call(jql="order by updated desc", maxResults=1, fields=["*all"])
+    r = call(jql=BOUND + " order by updated desc", maxResults=1, fields=["*all"])
     if r.status_code != 200 or not r.json().get("issues"):
         print("Q5 FAIL or no issues:", r.status_code)
         return
