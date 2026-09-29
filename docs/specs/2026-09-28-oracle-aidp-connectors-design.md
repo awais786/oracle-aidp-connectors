@@ -90,9 +90,11 @@ connectors/
     CLAUDE.md                 # connector-specific instructions
     REQUIREMENTS.md           # what it must do, acceptance criteria
     README.md                 # setup, usage, gotchas
+    LIVE_TEST_GUIDE.md        # self-contained handoff doc for the live AIDP run
     <source>.py               # helper module (imports connectors/_shared)
     tests/                    # offline unit tests, no Spark and no network
     examples/                 # notebooks
+    spike/                    # API-discovery probe + local Spark/Delta rehearsal
     live-results/             # dated result rows
 docs/specs/
 README.md  CHANGELOG.md  TESTING.md  LICENSE
@@ -224,11 +226,21 @@ defaults to UTC, which is only correct for a UTC account.
 
 - **Unit tests (offline, in CI).** Mocked HTTP covering paging, 429 backoff,
   watermark overlap, empty results and schema fallback; redaction tests for
-  anything that handles credentials.
+  anything that handles credentials. Mocked Spark/JVM objects for jar-loading
+  code. 85 tests as of the Jira Cloud connector.
+- **Local Spark/Delta rehearsal (manual, no AIDP needed).** A real local
+  PySpark + Delta Lake session runs the same read → `to_dataframe` → write →
+  incremental-MERGE calls the example notebook makes, against a live source
+  endpoint. Stronger than mocked unit tests (a real Delta table, real MERGE
+  semantics) without needing AIDP access; does not prove AIDP-specific things
+  (credential store, cluster networking, the exact runtime versions). See
+  `TESTING.md` and, for Jira, `connectors/jira/spike/local_spark_check.py`.
 - **Live tests (manual, recorded).** Each example notebook runs on a live AIDP
   cluster. The result (status, row count, date, cluster runtime) goes into
   `RESULTS.md` and a `row<N>.json` artifact. A row that could not run is marked
-  NOT RUN with the reason.
+  NOT RUN with the reason. `connectors/<source>/LIVE_TEST_GUIDE.md` is a
+  self-contained handoff doc for whoever has AIDP access, when that isn't the
+  same person who built the connector.
 - Live tests use throwaway endpoints and synthetic or vendor-sample data only.
 
 ## Spikes (answered before each connector's build)
@@ -267,7 +279,7 @@ as an assumption.
    — commits on `main`. The licence itself is still an open item below; only
    the disclaimer text is in place.
 2. Jira Cloud: spike (done, Proceed), helper, skill, example notebook (done,
-   62 unit tests). A whole-branch review before merge found three Critical
+   85 unit tests). A whole-branch review before merge found three Critical
    defects (fields defaulting to only `key`+`updated`, so the notebook loaded
    mostly-null rows; JQL watermark bounds sent in UTC while Jira reads them in
    the account's own timezone, which could silently skip issues; `pytest.ini`
@@ -276,8 +288,13 @@ as an assumption.
    native-type gate never answered; custom fields silently dropped instead of
    the documented JSON fallback). All fixed, each with a test written first;
    the full suite and `claude plugin validate .` both pass after the fix pass.
-   Live AIDP run and RESULTS row (Task 8) still pending AIDP workspace access
-   — not claimed as PASS.
+   After merge, `connectors/_shared/` was extracted (retry engine, Vault-aware
+   credentials, jar loading — adapted from Oracle's own connectors plugin), and
+   a local Spark+Delta rehearsal proved the write/incremental-MERGE path
+   against a real Jira site. Live AIDP run and RESULTS row (Task 8) still
+   pending AIDP workspace access — not claimed as PASS. A
+   `LIVE_TEST_GUIDE.md` is written so this step can be handed to whoever has
+   that access.
 3. Further connectors, chosen by demand from Arbisoft engineers and clients.
    Each follows the definition of done and gets its own spec section before it
    is built.

@@ -77,18 +77,26 @@ Jira's search endpoint, pagination and rate-limit behaviour themselves.
 ## Acceptance criteria
 
 - A1. A full read of project `KAN` returns the same issue count as the
-  project's own issue count in the Jira UI.
+  project's own issue count in the Jira UI. **Locally verified** (3-issue test
+  project, real Jira, real local Delta write) via
+  `spike/local_spark_check.py`; not yet checked on an AIDP cluster.
 - A2. With `maxResults` set small enough to need many pages, a full read
-  returns every issue key exactly once.
+  returns every issue key exactly once. **Locally verified**: a real Delta
+  table's row count equalled its distinct-key count after the write.
 - A3. An incremental read with a watermark returns only issues updated after
   it (plus the overlap window), and re-running with the new watermark returns
-  no unseen issues.
+  no unseen issues. **Locally verified**: a second run against unchanged data
+  read zero issues and left the target's row count unchanged.
 - A4. A forced 429 in unit tests results in a bounded retry and then a clear
-  error.
+  error. Verified by offline unit tests.
 - A5. A caller JQL string containing `ORDER BY` raises before any request is
-  sent.
+  sent. Verified by offline unit tests.
 - A6. The example notebook records a dated PASS row in `live-results/`, and
-  the gotchas found are written into the connector's README and skill.
+  the gotchas found are written into the connector's README and skill. **Not
+  yet done** — needs an actual AIDP cluster; see `LIVE_TEST_GUIDE.md`. A1–A3
+  passing locally does not substitute for this: AIDP's credential store,
+  cluster networking, and exact runtime versions remain unverified until this
+  runs there.
 
 ## Known limitations to document
 
