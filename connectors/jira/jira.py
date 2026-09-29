@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Tuple
 
@@ -91,3 +92,49 @@ def build_jql(*, since=None, until=None, query=None) -> str:
         parts.append('updated <= "%s"' % format_jql_timestamp(until))
     parts.append("ORDER BY updated ASC, key ASC")
     return " AND ".join(parts[:-1]) + (" " if parts[:-1] else "") + parts[-1]
+
+
+MAX_BACKOFF_SECONDS = 60.0
+
+
+def _retry_after_seconds(response, fallback: float) -> float:
+    value = response.headers.get("Retry-After")
+    try:
+        return min(max(float(value), 0.0), MAX_BACKOFF_SECONDS)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def post_json(session, url, body, *, timeout=60, max_retries=5, sleep=time.sleep) -> dict:
+    """POST ``body`` to ``url`` and return the parsed JSON, with bounded 429 retries."""
+    attempt = 0
+    while True:
+        response = session.post(url, json=body, timeout=timeout)
+        status = response.status_code
+        if status == 429:
+            if attempt >= max_retries:
+                raise JiraRateLimitError(
+                    "rate limited (HTTP 429) after {} retries".format(max_retries)
+                )
+            sleep(_retry_after_seconds(response, min(2 ** attempt, MAX_BACKOFF_SECONDS)))
+            attempt += 1
+            continue
+        if status in (401, 403):
+            raise JiraAuthError(
+                "HTTP {}: check the site, email and API token".format(status)
+            )
+        if status >= 400:
+            raise JiraError(
+                "HTTP {} from the Jira search API: {}".format(status, _safe_body(response))
+            )
+        try:
+            return response.json()
+        except ValueError:
+            raise JiraError("response was not JSON; check the site name and URL") from None
+
+
+def _safe_body(response) -> str:
+    try:
+        return str(response.json())[:300]
+    except ValueError:
+        return "<non-JSON body>"
