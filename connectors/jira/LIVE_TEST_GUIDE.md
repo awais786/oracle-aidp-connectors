@@ -22,11 +22,29 @@ hostname, instance URL, OCID, or credential).
 ## Step 1 — Upload the code
 
 Upload these two things to the **same** folder in the AIDP workspace (e.g.
-via the workspace file browser):
+via the workspace file browser), so it ends up looking like this:
+
+```
+<the folder you uploaded to>/
+  jira.py
+  _shared/
+    __init__.py
+    aidp_http.py
+    aidp_secrets.py
+    aidp_jars.py
+```
 
 - `connectors/jira/jira.py`
-- the whole `connectors/_shared/` folder (keep its name — `jira.py` imports
-  `aidp_http` and `aidp_secrets` from it as siblings)
+- the whole `connectors/_shared/` folder, **keeping its name** (`_shared`) —
+  don't flatten it into the parent folder.
+
+`jira.py` does `import aidp_http` and `import aidp_secrets` as bare names, not
+`from _shared import ...` — so it's not enough to put `_shared/` next to
+`jira.py`. The folder that *directly contains* `aidp_http.py` and
+`aidp_secrets.py` (i.e. `<HELPER_DIR>/_shared`) has to be on `sys.path` too.
+The example notebook's first cell already does this (it inserts both
+`HELPER_DIR` and `HELPER_DIR/_shared`) — just make sure your upload matches
+the layout above so that second path actually contains the files.
 
 Note the workspace path you uploaded them to — you'll need it in Step 3.
 
@@ -93,9 +111,14 @@ findings got written up.
 
 ## If something goes wrong
 
-- **Import error on `jira.py` or `_shared`:** check `HELPER_DIR` points at the
-  folder containing *both* uploads, and that the notebook's first cell
-  (`sys.path.insert(0, HELPER_DIR)`) actually ran before the import cell.
+- **`ModuleNotFoundError: No module named 'aidp_http'` (or `aidp_secrets`):**
+  the `_shared` folder isn't laid out at `HELPER_DIR/_shared` exactly as
+  shown in Step 1 — check the file browser shows `_shared/` as a real
+  subfolder there (not flattened, not nested one level deeper), and that
+  `HELPER_DIR` is set correctly before the import cell runs.
+- **Import error on `jira.py` itself:** check `HELPER_DIR` points at the
+  folder containing `jira.py`, and that the notebook's first cell (the two
+  `sys.path.insert(...)` lines) actually ran before the import cell.
 - **Auth error (401/403):** double-check the API token was copied in full and
   the email matches the Atlassian account that owns it.
 - **Anything else:** paste the exact error text (redact anything that looks
