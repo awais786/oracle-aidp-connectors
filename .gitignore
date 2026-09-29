@@ -7,3 +7,5 @@ __pycache__/
 .ipynb_checkpoints/
 connectors/*/spike/out/
 .idea/
+.venv-spark/
+spark-warehouse/
