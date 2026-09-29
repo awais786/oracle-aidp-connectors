@@ -27,7 +27,7 @@ probe output):
 
 - Auth: HTTP Basic, `email:api_token`. A real API token from
   id.atlassian.com/manage/api-tokens was accepted with no MFA/Basic-Auth
-  restriction of any kind — unlike ServiceNow, this worked on the first try.
+  restriction of any kind, on the first try.
 - `POST /rest/api/3/search/jql` behaves exactly as documented: `nextPageToken`
   advances correctly, `isLast` flips to `true` on the final page (and
   `nextPageToken` is then absent), and paging is lossless.
@@ -61,9 +61,8 @@ probe output):
 - Use `requests` only. Do not add the Atlassian Python SDK.
 - Page with `nextPageToken` only. Never assume or compute an offset.
 - Incremental loads use JQL `updated >= "<timestamp>" ORDER BY updated ASC, key
-  ASC` inside a fixed-until window, the same pattern as the ServiceNow
-  connector: fix an upper bound per run, re-read a small overlap on the next
-  run's lower bound, de-duplicate by issue key.
+  ASC` inside a fixed-until window: fix an upper bound per run, re-read a small
+  overlap on the next run's lower bound, de-duplicate by issue key.
 - Reject a caller-supplied JQL fragment that already contains `ORDER BY` —
   paging adds its own ordering, and two `ORDER BY` clauses conflict.
 - Retry on 429 with `Retry-After`, bounded. Every request has a timeout.

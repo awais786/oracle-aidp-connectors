@@ -6,7 +6,7 @@ Live-tested ingestion recipes for Oracle AI Data Platform (AIDP) Workbench, deli
 
 | Connector | Status |
 |---|---|
-| ServiceNow | In development. Not listed as supported until a live PASS is recorded. |
+| Jira Cloud | In development. Not listed as supported until a live PASS is recorded. |
 
 Design: `docs/specs/2026-09-28-oracle-aidp-connectors-design.md`. Development rules: `CLAUDE.md`.
 
