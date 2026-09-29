@@ -20,24 +20,41 @@ once verified):
 Never hard-code these, never put them in a notebook cell output, never commit a
 real site name. Examples use `<site>.atlassian.net`.
 
-## API facts (unverified until a spike run confirms them)
+## API facts
 
-- Auth: HTTP Basic, `email:api_token` base64-encoded. This is Atlassian's own
-  documented method for scripts (developer.atlassian.com, "Basic auth for REST
-  APIs"), not deprecated as of 2026-09-29.
-- Search endpoint: `POST https://<site>/rest/api/3/search/jql` with a JSON body
-  `{"jql": "...", "fields": [...], "maxResults": N, "nextPageToken": "..."}`.
-  The older `GET/POST /rest/api/3/search` (offset/`startAt` pagination) was
+**Verified 2026-09-29** against a live site (`spike/RESULTS.md` has the raw
+probe output):
+
+- Auth: HTTP Basic, `email:api_token`. A real API token from
+  id.atlassian.com/manage/api-tokens was accepted with no MFA/Basic-Auth
+  restriction of any kind — unlike ServiceNow, this worked on the first try.
+- `POST /rest/api/3/search/jql` behaves exactly as documented: `nextPageToken`
+  advances correctly, `isLast` flips to `true` on the final page (and
+  `nextPageToken` is then absent), and paging is lossless.
+- **`maxResults` maximum is exactly 5000.** A value above it is rejected with
+  `HTTP 400 {"errorMessages":["The max results parameter has to be between 1
+  and 5,000."]}` — not silently capped.
+- **A JQL query with no restricting clause is rejected**: `HTTP 400
+  {"errorMessages":["Unbounded JQL queries are not allowed here..."]}`. Does
+  not affect this connector, since `search_issues` always includes an
+  `updated <= "<until>"` bound — but never call `search_issues()` with no
+  `query` and no watermark expecting an unrestricted default; there isn't one.
+- **Timestamps are NOT UTC.** `updated`/`created` come back in the requesting
+  account's configured timezone (observed `+0500`, not `+0000`). The parser
+  (`%Y-%m-%dT%H:%M:%S.%f%z`) handles any offset correctly — no code change was
+  needed — but do not assume UTC when reading these columns downstream.
+- Rate-limit headers `X-Ratelimit-Limit` / `X-Ratelimit-Remaining` are present
+  and decrement per request (200 → 197 observed). No 429 was ever triggered
+  live, so the retry path is verified only by offline unit tests.
+- `reporter`/`assignee` are dicts with `displayName` (or `null` when unset);
+  `status`/`priority` are dicts with `name`. Custom fields follow
+  `customfield_NNNNN`.
+- **v1 limitation, confirmed live:** custom fields are not in `TYPED_FIELDS`,
+  so `to_dataframe` silently drops any custom field a caller requests via
+  `fields=`. Document this for users; fixing it is a future v2 item, not
+  blocking this connector's PASS.
+- The older `GET/POST /rest/api/3/search` (offset/`startAt` pagination) was
   fully sunset by Atlassian by 31 October 2025 and no longer works.
-- Pagination: cursor-based via `nextPageToken` in the response; there is no
-  reliable `total` count on this endpoint. The response omits `nextPageToken`
-  when `isLast` is true.
-- Default `maxResults` is 50 if unset; the real maximum is unverified — probe it
-  by requesting a large value and reading back what the server actually returns.
-- Rate limiting: expect HTTP 429; check for `Retry-After`.
-
-When a spike confirms or refutes one of these, update this file and mark the
-fact verified with the date.
 
 ## Working rules
 
