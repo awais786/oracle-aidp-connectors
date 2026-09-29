@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime, timezone
 from typing import Tuple
 
 ENV_SITE = "JIRA_SITE"
@@ -65,3 +66,28 @@ def redact(text: str, *secrets: str) -> str:
         if secret:
             text = text.replace(secret, "***")
     return text
+
+
+_FORBIDDEN_IN_QUERY = re.compile(r"order\s+by", re.I)
+
+
+def format_jql_timestamp(value: datetime) -> str:
+    """UTC ``YYYY-MM-DD HH:MM`` (JQL date-time literal). Naive == UTC."""
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc)
+    return value.strftime("%Y-%m-%d %H:%M")
+
+
+def build_jql(*, since=None, until=None, query=None) -> str:
+    """JQL for one search. Caller query is ANDed with the watermark window."""
+    if query and _FORBIDDEN_IN_QUERY.search(query):
+        raise ValueError("query must not contain ORDER BY; paging adds its own ordering")
+    parts = []
+    if query:
+        parts.append("(%s)" % query.strip())
+    if since is not None:
+        parts.append('updated >= "%s"' % format_jql_timestamp(since))
+    if until is not None:
+        parts.append('updated <= "%s"' % format_jql_timestamp(until))
+    parts.append("ORDER BY updated ASC, key ASC")
+    return " AND ".join(parts[:-1]) + (" " if parts[:-1] else "") + parts[-1]
