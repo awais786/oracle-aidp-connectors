@@ -18,21 +18,29 @@ existing connector plugin. The value is the **tested recipe and the knowledge
 captured from running it on AIDP**.
 
 The collection is source-agnostic. Any source can be added if it meets the
-definition of done below. The first connector is **ServiceNow**, which tests
-REST-based ingestion, authentication, pagination, rate limiting, watermark-based
-incremental reads, and API-to-Spark normalization.
+definition of done below. **ServiceNow** was started first and is **paused**:
+two fresh Personal Developer Instances both refused HTTP Basic auth for `admin`
+(`401 User is not authenticated`), matching ServiceNow's Basic Auth Restriction
+/ MFA-on-new-instances behaviour, and an OAuth Client Credentials attempt also
+failed (`access_denied`), most likely because
+`glide.oauth.inbound.client.credential.grant_type.enabled` is unset. Its code
+(query builder, HTTP layer with retry) is committed and tested on the
+`servicenow-connector` branch and can resume once the instance accepts API
+auth. **Jira Cloud** is the active first connector: it tests REST-based
+ingestion, HTTP Basic auth with an API token, cursor pagination, rate limiting,
+watermark-based incremental reads, and API-to-Spark normalization.
 
 The project remains independent of `oracle-samples/oracle-aidp-samples`;
 upstream contribution can be considered later after the recipes have been
 proven.
 
 **Coverage check (2026-09-28).** A search of `oracle-aidp-samples` for
-"servicenow" across notebooks, Markdown, Python and JSON found no match. Its
-read-only connector folder covers Fusion BICC, Kafka, MySQL HeatWave, NetSuite,
-PeopleSoft, Siebel, REST, Salesforce and Snowflake. This checks the repository
-files only; it does not prove AIDP has no native type for a source, so every
-connector's first spike step confirms that against Oracle's connector
-documentation.
+"servicenow" and "jira" across notebooks, Markdown, Python and JSON found no
+match for either. Its read-only connector folder covers Fusion BICC, Kafka,
+MySQL HeatWave, NetSuite, PeopleSoft, Siebel, REST, Salesforce and Snowflake.
+This checks the repository files only; it does not prove AIDP has no native
+type for a source, so every connector's first spike step confirms that against
+Oracle's connector documentation.
 
 ## Definition of done (every connector)
 
@@ -49,9 +57,8 @@ as experimental; the README does not list it as supported.
 
 ## Intent and success criteria
 
-- A colleague or client can install the plugin, tell Claude "load ServiceNow
-  incidents updated since yesterday", and get a Spark DataFrame in an AIDP
-  notebook.
+- A colleague or client can install the plugin, tell Claude "load Jira issues
+  updated since yesterday", and get a Spark DataFrame in an AIDP notebook.
 - Known problems are written into each skill, not left for users to rediscover.
 - Adding the next connector means following this spec, not redesigning it.
 
@@ -59,8 +66,8 @@ Assumptions (from the requester, not verified against clients):
 
 - Arbisoft engineers and clients use AIDP and need data from these systems.
 - Notebooks run on the AIDP runtime contract: Spark 3.5, Python 3.11, Java 17.
-- Testing uses free public endpoints (for ServiceNow, a Personal Developer
-  Instance). No client data enters this repo.
+- Testing uses free public endpoints (a ServiceNow Personal Developer Instance;
+  a free, self-service Jira Cloud site). No client data enters this repo.
 - No pull requests to Oracle. The layout follows Oracle's connectors plugin so
   upstreaming stays possible later.
 
@@ -71,7 +78,10 @@ Assumptions (from the requester, not verified against clients):
   without admin-configured peering, so v1 targets public TLS endpoints only.
 - Transformation, medallion pipelines or any other layer above ingestion.
 - A general pipeline or connector framework.
-- ServiceNow OAuth flows and attachments.
+- ServiceNow attachments. ServiceNow OAuth was tried as a workaround for the
+  Basic-auth block (see Purpose) and is a live finding, not a shipped feature;
+  it stays out of the ServiceNow connector's v1 scope.
+- Jira Cloud OAuth 2.0 (3LO), webhooks, and writing issues.
 
 ## Repository layout
 
@@ -121,7 +131,7 @@ set, verifies each file's SHA-256 against a pinned value, registers it with a
 `URLClassLoader`, and calls `spark._jsc.addJar` so executors get it. This follows
 the pattern documented for PostgreSQL and S3 in Oracle's plugin notes.
 
-## ServiceNow connector
+## ServiceNow connector (paused — see Purpose)
 
 Transport: the ServiceNow Table API (`/api/now/table/<table>`) over HTTPS, read
 with `requests` and materialised as a DataFrame.
@@ -162,11 +172,49 @@ objects versus plain values under `sysparm_display_value`, timezone of
 `sys_updated_on`, table-level ACLs returning empty results instead of errors,
 and developer-instance hibernation and reclamation.
 
+## Jira Cloud connector
+
+Transport: the Jira Cloud REST API v3 search endpoint
+(`POST /rest/api/3/search/jql`) over HTTPS, read with `requests` and
+materialised as a DataFrame. The older `GET/POST /rest/api/3/search`
+(offset/`startAt` pagination) was fully sunset by Atlassian by 31 October 2025;
+`search/jql` with `nextPageToken` pagination is the current endpoint as of
+2026-09-29, verified against Atlassian's own developer documentation and
+migration notices, and reconfirmed live in the spike before any paging code is
+written.
+
+`jira.py` provides:
+
+- `jira_session(email, api_token)`: a `requests.Session` with HTTP Basic auth
+  (`email:api_token`) — Atlassian's own documented method for scripts, distinct
+  from the OAuth 2.0 (3LO) flow required for distributed apps, which is out of
+  scope here since this is a single organisation's own script against its own
+  site.
+- `search_issues(session, site, *, jql, fields, since, overlap_seconds, until,
+  page_size)`: a generator that pages via `nextPageToken` only (never an
+  offset), retries on HTTP 429 honouring `Retry-After`, and enforces a timeout.
+  Rejects a caller `jql` containing `ORDER BY`, since paging supplies its own
+  `ORDER BY updated ASC, key ASC`.
+- Incremental loads: the JQL gains `updated >= "<lower>" AND updated <= "<T0>"`
+  ANDed onto the caller's filter, the same fixed-window-plus-overlap shape as
+  ServiceNow's design, but without a keyset-ordering landmine to solve — Jira's
+  `nextPageToken` is an opaque cursor Atlassian manages, not a value the caller
+  constructs.
+- `to_dataframe(spark, rows)`: typed columns for common issue fields (`key`,
+  `summary`, `status`, `priority`, `assignee`, `reporter`, `created`, `updated`,
+  `issuetype`, `project`); any other requested field is carried as a JSON
+  string, the same fallback pattern as the ServiceNow and Fusion REST helpers.
+
+Gotchas to verify and record: the real maximum `maxResults` (documented default
+is 50), rate-limit headers, how `assignee`/`reporter` person objects and custom
+fields (`customfield_XXXXX`) appear in the response, the timezone of `updated`,
+and the response shape for an invalid JQL string.
+
 ## Testing
 
-- **Unit tests (offline, in CI).** For ServiceNow: mocked HTTP covering paging,
-  429 backoff, watermark overlap, empty results and schema fallback; redaction
-  tests for anything that handles credentials.
+- **Unit tests (offline, in CI).** For ServiceNow and Jira: mocked HTTP covering
+  paging, 429 backoff, watermark overlap, empty results and schema fallback;
+  redaction tests for anything that handles credentials.
 - **Live tests (manual, recorded).** Each example notebook runs on a live AIDP
   cluster. The result (status, row count, date, cluster runtime) goes into
   `RESULTS.md` and a `row<N>.json` artifact. A row that could not run is marked
@@ -187,25 +235,40 @@ ServiceNow:
 3. What do reference fields and timestamps look like with each
    `sysparm_display_value` setting?
 
+Jira Cloud:
+1. Does `POST /rest/api/3/search/jql` behave as documented against a real site
+   (JQL + fields in the body, `nextPageToken` in the response)?
+2. What is the real maximum `maxResults`, and the rate-limit behaviour?
+3. How do custom fields, person objects, and timestamps appear, and in what
+   timezone?
+4. What does an invalid JQL string return?
+
 Each answer is recorded in the connector's skill as a documented fact, not left
 as an assumption.
 
 ## Delivery order
 
-0. Gates, checked before any code: (a) a live AIDP workspace and cluster are
-   available; (b) a ServiceNow Personal Developer Instance has been obtained
-   from developer.servicenow.com (Request Instance). Instances are reclaimed
-   after 10 days of inactivity on the developer site, so the live run is
-   scheduled shortly after the instance is requested.
+0. Gates, checked before any code:
+   - ServiceNow: a live AIDP workspace and cluster; a Personal Developer
+     Instance from developer.servicenow.com. **Currently blocked** — see
+     Purpose. Instances are reclaimed after 10 days of developer-site
+     inactivity.
+   - Jira Cloud: a live AIDP workspace and cluster; a free Jira Cloud site
+     (self-service at id.atlassian.com) and an API token
+     (id.atlassian.com/manage/api-tokens).
 1. Repo scaffold: plugin manifests, README with disclaimer and license, test
-   harness.
+   harness. Done — commits on `main`.
 2. ServiceNow: spike, helper, skill, example notebook, live run, RESULTS row.
-3. Further connectors, chosen by demand from Arbisoft engineers and clients.
+   Paused after the query builder and HTTP layer (committed, tested, on branch
+   `servicenow-connector`); resumes once the instance accepts API auth.
+3. Jira Cloud (active): spike, helper, skill, example notebook, live run,
+   RESULTS row.
+4. Further connectors, chosen by demand from Arbisoft engineers and clients.
    Each follows the definition of done and gets its own spec section before it
    is built.
 
 Separate pull requests within the repo for each connector. No calendar estimates
-until the first spike shows how the cluster behaves.
+until each connector's own spike shows how its endpoint behaves.
 
 ## Risks
 
@@ -214,8 +277,15 @@ until the first spike shows how the cluster behaves.
   tested is marked NOT RUN and stays experimental.
 - **Version drift.** AIDP runtime or connector releases can break the recipes.
   Mitigation: pinned versions, dated results, and a documented re-test procedure.
-- **Free-tier limits.** Developer-instance reclamation and hibernation break
-  unattended runs. Mitigation: documented setup steps in `TESTING.md`.
+- **Free-tier limits.** ServiceNow developer-instance reclamation and
+  hibernation, and any Jira Cloud free-site rate limits, can break unattended
+  runs. Mitigation: documented setup steps in `TESTING.md`.
+- **API churn.** Atlassian has already sunset one search endpoint
+  (`/rest/api/3/search`) in favour of `search/jql`; a forum thread also
+  questions whether `search/jql` itself is being changed. Mitigation: the
+  spike reconfirms current behaviour live before any paging code is written,
+  and the connector's skill is updated, not assumed correct from documentation
+  alone.
 - **Naming.** The name starts with "oracle-". See the README disclaimer; confirm
   with Arbisoft before making the repo public.
 - **Licensing.** Oracle's plugin is MIT and its repository root is UPL. Any code
