@@ -10,8 +10,11 @@ notebook, using the REST API v3. No writes, no webhooks, no OAuth in v1.
 
 ## Configuration
 
-Credentials come only from environment variables (or the AIDP credential store
-once verified):
+`credentials_from_env()` resolves each of the three values below through
+`connectors/_shared/aidp_secrets.py`: OCI Vault first (if `OCI_VAULT_ID` is
+set), falling back to a plain environment variable. This is structurally
+implemented and unit-tested; the Vault path itself has not been exercised
+against a real OCI Vault (unverified until a live run proves it).
 
 - `JIRA_SITE`: site host, e.g. `example.atlassian.net` (no scheme, no path)
 - `JIRA_EMAIL`: the Atlassian account email
@@ -49,10 +52,11 @@ probe output):
 - `reporter`/`assignee` are dicts with `displayName` (or `null` when unset);
   `status`/`priority` are dicts with `name`. Custom fields follow
   `customfield_NNNNN`.
-- **v1 limitation, confirmed live:** custom fields are not in `TYPED_FIELDS`,
-  so `to_dataframe` silently drops any custom field a caller requests via
-  `fields=`. Document this for users; fixing it is a future v2 item, not
-  blocking this connector's PASS.
+- **Custom fields are preserved, not dropped.** Any requested field not in
+  `TYPED_FIELDS` (including a `customfield_NNNNN`) lands in a trailing
+  `raw_fields` JSON-string column rather than being silently discarded (fixed
+  after an initial version of this connector dropped them — see the whole-
+  branch review notes in the implementation plan).
 - The older `GET/POST /rest/api/3/search` (offset/`startAt` pagination) was
   fully sunset by Atlassian by 31 October 2025 and no longer works.
 
@@ -69,6 +73,27 @@ probe output):
 - Unit tests use mocked HTTP. Never call a real site from a unit test.
 - Live tests force a small `maxResults` so paging is exercised.
 
+## Shared package (`connectors/_shared/`)
+
+`jira.py` imports two sibling modules rather than defining this logic itself:
+
+- `aidp_http.py`: the bounded-429-retry request engine (`post_json`,
+  `get_json`), the generic `ConnectorError`/`ConnectorAuthError`/
+  `ConnectorRateLimitError` classes (re-exported here as `JiraError` etc. —
+  same classes, not subclasses), and `redact()`.
+- `aidp_secrets.py`: the Vault → environment → default credential fallback
+  used by `credentials_from_env()`.
+
+Both are adapted from Oracle's own
+`oracle-ai-data-platform-workbench-spark-connectors` plugin (MIT licence,
+Copyright (c) 2026 Ahmed Awan) — rewritten for this repo's naming and test
+style, not copied verbatim; see each file's module docstring for the
+attribution. `aidp_jars.py` (runtime JAR/JDBC-driver loading) is adapted the
+same way, ready for the next connector that needs one (Jira does not).
+
+A notebook must upload **both** `jira.py` and the `_shared/` folder to the
+same workspace path — see the example notebook's first cell.
+
 ## Files (created once the plan is approved)
 
 ```
@@ -76,7 +101,7 @@ connectors/jira/
   CLAUDE.md          this file
   REQUIREMENTS.md    what it must do, acceptance criteria
   README.md          setup, usage, gotchas (written from live results)
-  jira.py            helper module
+  jira.py            helper module (imports connectors/_shared)
   tests/             offline unit tests
   examples/          notebooks
   live-results/      dated result rows (placeholders only, no real site name)

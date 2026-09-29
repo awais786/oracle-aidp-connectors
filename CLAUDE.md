@@ -13,6 +13,14 @@ before changing anything; it is the source of truth for scope and layout.
   `REQUIREMENTS.md`. Read both before working on that connector.
 - Spike first: answer the connector's open questions against a real endpoint
   before writing its helper. Record each answer as a verified fact.
+- **Probe identity/auth first**, before the connector's main resource (e.g.
+  Jira's `/rest/api/3/myself` before `/search/jql`). The identity endpoint is
+  usually the cheapest call, confirms auth works before anything else is
+  built on top of it, and can surface facts (timezone, tenant metadata) the
+  main resource's spike questions never think to ask.
+- **One test request before any bulk operation while live-debugging**,
+  especially around auth. A wrong password retried in a loop can trip a
+  lockout or rate limit that then blocks even the correct one.
 - One connector per pull request.
 
 ## Definition of done (every connector)
@@ -37,6 +45,15 @@ experimental and is not listed as supported.
 - Do not add a dependency the AIDP cluster does not already have unless the
   connector cannot work without it.
 - Extract shared code only when a second connector needs the same thing.
+  Shared infra lives in `connectors/_shared/` (`aidp_http.py` for the retry
+  engine, `aidp_secrets.py` for credential resolution, `aidp_jars.py` for
+  runtime JAR loading) — a notebook uploads it alongside the connector's own
+  file, following Oracle's own connectors-plugin pattern of one shared
+  package referenced by every connector.
+- Never name a shared module after a Python standard library module (e.g.
+  `secrets.py`, `http.py`) — once its directory is on `sys.path`, it silently
+  shadows the real one for anything else that imports it. Prefix with `aidp_`
+  or similar instead.
 - Runtime contract: Spark 3.5, Python 3.11, Java 17. Write code that runs there.
 - Do not copy code from Oracle's repositories without checking its licence and
   adding attribution. Default is to write our own following the same patterns.

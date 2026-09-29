@@ -81,11 +81,16 @@ CLAUDE.md                     # project-wide instructions
 skills/
   aidp-<source>/SKILL.md      # one thin skill per connector (plugin discovery)
 connectors/
+  _shared/                     # cross-connector infra, uploaded once per workspace
+    aidp_http.py                # bounded-retry request engine, generic errors, redact()
+    aidp_secrets.py             # OCI Vault -> env -> default credential resolution
+    aidp_jars.py                # runtime JDBC/Spark-connector jar loading
+    tests/
   <source>/                   # everything for one connector lives here
     CLAUDE.md                 # connector-specific instructions
     REQUIREMENTS.md           # what it must do, acceptance criteria
     README.md                 # setup, usage, gotchas
-    <source>.py               # helper module
+    <source>.py               # helper module (imports connectors/_shared)
     tests/                    # offline unit tests, no Spark and no network
     examples/                 # notebooks
     live-results/             # dated result rows
@@ -94,32 +99,61 @@ README.md  CHANGELOG.md  TESTING.md  LICENSE
 ```
 
 The only connector file outside `connectors/<source>/` is its skill, because the
-Claude Code plugin discovers skills from `skills/`. Whether the helper can be
-imported from `connectors/<source>/` inside a notebook, or must be packaged
-under a single Python package, is settled in the scaffold step.
+Claude Code plugin discovers skills from `skills/`. The helper is imported from
+a sibling `connectors/_shared/` package rather than packaged as a single
+standalone file — this follows Oracle's own connectors plugin, which uploads
+one shared package (`oracle_ai_data_platform_connectors`) once per workspace
+and has every connector skill import from it, rather than each connector
+carrying its own copy of common code. A notebook uploads both the connector's
+own file and `_shared/` to the same workspace folder and adds that folder to
+`sys.path`.
 
 Rules:
 
 - One connector per pull request, each with its own live-result row.
 - Skills stay thin. Logic lives in `connectors/<source>/` and is unit-tested.
-- Shared modules (credential lookup, runtime jar loading) are extracted only when
-  a second connector needs the same code.
+- Shared modules are extracted only when a second connector needs the same
+  code — done: `connectors/_shared/` holds the retry engine, credential
+  resolution, and jar-loading helper, all connectors import from it.
+- Never name a shared module after a Python standard library module (e.g.
+  `secrets.py`, `http.py`) — it silently shadows the real one once its
+  directory is on `sys.path`. Prefix with `aidp_`.
 - The README carries: "Independent project by Arbisoft. Not affiliated with or
   endorsed by Oracle. Oracle and AI Data Platform are trademarks of Oracle
   Corporation."
 
 ## Shared conventions
 
-**Credentials.** Helpers resolve a credential from an environment variable or the
-AIDP credential store and return the value; they never print it. Any option
-dictionary or URL containing a credential is redacted before it reaches a log
-line or exception message.
+**Credentials.** `connectors/_shared/aidp_secrets.py::get_secret()` resolves a
+credential from OCI Vault (if `OCI_VAULT_ID` is set) falling back to an
+environment variable, and never prints it. Adapted from Oracle's own
+`oracle_ai_data_platform_connectors.auth.secrets` (MIT licence, Copyright (c)
+2026 Ahmed Awan) — rewritten for this repo, not copied verbatim. Any option
+dictionary or URL containing a credential is redacted (`aidp_http.redact()`)
+before it reaches a log line or exception message. The Vault path is
+implemented and unit-tested; it has not yet been exercised against a real OCI
+Vault by any connector's live run.
 
-**Runtime jars (for connectors that need one).** The cluster has no extra
-drivers pre-installed. A jar-based connector downloads a pinned Maven artifact
-set, verifies each file's SHA-256 against a pinned value, registers it with a
-`URLClassLoader`, and calls `spark._jsc.addJar` so executors get it. This follows
-the pattern documented for PostgreSQL and S3 in Oracle's plugin notes.
+**HTTP retries.** `connectors/_shared/aidp_http.py` is a bounded-429-retry
+JSON request engine used by every REST connector, with generic
+`ConnectorError`/`ConnectorAuthError`/`ConnectorRateLimitError` classes each
+connector re-exports under its own name. Deliberately hand-rolled rather than
+configuring retry on the `requests` session/transport (Oracle's own shown
+pattern, `auth.user_principal.http_basic_session`, does the latter via a
+`urllib3.Retry` adapter) — Oracle's shown adapter forcelists only
+500/502/503/504, not 429, which Jira Cloud needs; the
+hand-rolled version also lets a test inject a fake `sleep` and assert exact
+backoff behaviour.
+
+**Runtime jars (for connectors that need one).** `connectors/_shared/aidp_jars.py`
+loads a JDBC driver or Spark DataSource jar into a running session without
+restarting it, and verifies each downloaded jar's SHA-256 against a pinned
+value before any connector loads it, refusing (and deleting the file) on a
+mismatch. Adapted from Oracle's own
+`oracle_ai_data_platform_connectors.jdbc.runtime_load` (MIT licence,
+Copyright (c) 2026 Ahmed Awan) — rewritten for this repo, not copied verbatim.
+Not yet used by a shipped connector (Jira needs no jar); ready for the next
+one that does.
 
 ## Jira Cloud connector
 
