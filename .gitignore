@@ -9,3 +9,4 @@ connectors/*/spike/out/
 .idea/
 .venv-spark/
 spark-warehouse/
+.worktrees/
