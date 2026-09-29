@@ -231,6 +231,45 @@ parameter on `format_jql_timestamp`/`build_jql`/`search_issues`, which the
 notebook fetches once per run and passes explicitly. Omitting `tz_name`
 defaults to UTC, which is only correct for a UTC account.
 
+## Zendesk connector
+
+Status: scope approved 2026-09-30, pre-spike. Everything below is
+**unverified** (from Zendesk's public API docs, not yet observed live)
+except where marked otherwise; the spike must confirm each item before
+Task 3 of the implementation plan is written, same discipline as Jira.
+
+Transport: the Zendesk REST API v2 Incremental Exports endpoint
+(`GET /api/v2/incremental/tickets/cursor.json`), read with `requests` and
+materialised as a DataFrame — Zendesk's own purpose-built endpoint for full
+and incremental ticket sync, analogous to Jira's `search/jql` replacing its
+sunset offset endpoint.
+
+`zendesk.py` (planned) provides:
+
+- `zendesk_session(subdomain, email, api_token)`: HTTP Basic auth
+  (`{email}/token:{api_token}`), same shape as Jira. Credentials resolved
+  via `_shared/aidp_secrets.py`, reused unchanged.
+- `export_tickets(...)`: a generator paging via `after_cursor` until
+  `end_of_stream: true`. Never builds or assumes an offset.
+- Rate limit: **10 req/min on this endpoint (30 with the High-Volume
+  add-on)** — far tighter than Jira's. `_shared/aidp_http.py`'s retry engine
+  is reused, with a Zendesk-specific rate-limit header parser layered on
+  top if the spike confirms its header format differs from Jira's.
+- **Open design question the spike must settle:** Jira derives `since` from
+  `max(updated)` each run (stateless). Zendesk's export API is built around
+  resuming from a persisted `after_cursor` instead — may require storing
+  cursor state between runs. Full detail: `connectors/zendesk/REQUIREMENTS.md` F4.
+- `to_dataframe(spark, rows)` (planned): typed ticket columns (`id`,
+  `subject`, `status`, `priority`, `requester`, `assignee`, `group`,
+  `created_at`, `updated_at`, `tags`) + a `raw_fields` fallback — Zendesk's
+  `custom_fields` (`[{id, value}]` array) differs from Jira's
+  `customfield_NNNNN` keys and needs its own tests.
+
+**Non-goals v1:** users, organizations, help-center articles, satisfaction
+ratings, writeback, OAuth2, webhooks.
+
+Full API facts (unverified) and sources: `connectors/zendesk/CLAUDE.md`.
+
 ## Testing
 
 - **Unit tests (offline, in CI).** Mocked HTTP covering paging, 429 backoff,

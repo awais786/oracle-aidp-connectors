@@ -7,9 +7,12 @@ Each connector is a small, unit-tested Python helper plus an example
 notebook, run against a real endpoint from a live AIDP workspace, with the
 gotchas found written down.
 
-| Connector | Status |
-|---|---|
-| Jira Cloud | In development. Not listed as supported until a live PASS is recorded. |
+| Connector | Ingests | Status | Docs |
+|---|---|---|---|
+| **Jira Cloud** | Issues, full or incremental, via `search/jql` cursor paging | ✅ **Supported** — live PASS recorded 2026-09-30 | [`connectors/jira/`](connectors/jira/) · [live results](connectors/jira/live-results/RESULTS.md) |
+| **Zendesk** | Tickets, via the Incremental Exports cursor endpoint | 🚧 In development — scope approved, pre-spike, no code yet | [`connectors/zendesk/`](connectors/zendesk/) |
+
+Candidates for what to build next: see [GitHub issue #1](https://github.com/awais786/oracle-aidp-connectors/issues/1).
 
 ## How it works
 
