@@ -8,6 +8,34 @@ Live-tested ingestion recipes for Oracle AI Data Platform (AIDP) Workbench, deli
 |---|---|
 | Jira Cloud | In development. Not listed as supported until a live PASS is recorded. |
 
+## How it works
+
+A plugin is instructions plus code — nothing runs on its own until someone
+asks for it. Two things happen in two different places:
+
+```
+"load Jira issues updated since yesterday"
+        │
+        ▼
+Claude Code matches the aidp-jira skill (skills/aidp-jira/SKILL.md)
+        │  the skill tells Claude what to upload and set up
+        ▼
+Claude uploads jira.py + connectors/_shared/ to the AIDP workspace,
+sets JIRA_SITE/JIRA_EMAIL/JIRA_API_TOKEN, opens the example notebook
+        │
+        ▼
+The notebook runs ON THE AIDP CLUSTER, not inside Claude Code:
+  jira.py → search_issues() → to_dataframe() → Delta write / MERGE
+        │
+        ▼
+A queryable table in AIDP
+```
+
+Claude Code and the skill handle the conversational "figure out what to do"
+part. The plugin's own Python code, running on the AIDP cluster, handles the
+actual data movement — that code is unit-tested and, for Jira, already
+live-verified against a real site independently of any AIDP access.
+
 ## Install as a Claude Code plugin
 
 From a local clone:
@@ -17,8 +45,8 @@ From a local clone:
 /plugin install oracle-aidp-connectors@oracle-aidp-connectors
 ```
 
-*(`claude plugin validate .` passes; the install flow itself is unverified —
-nobody has run it end to end yet.)*
+*(Verified: `claude plugin validate .` passes, and both commands above were
+run locally end to end — marketplace add and install both succeeded.)*
 
 Then ask Claude, e.g. "load Jira issues updated since yesterday" — the
 `aidp-jira` skill routes the request. Each skill's own prerequisites (what to
