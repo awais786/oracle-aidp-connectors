@@ -1,34 +1,41 @@
 """Jira Cloud REST API v3 reader for AIDP notebooks.
 
-Read-only. Uses only ``requests``. Credentials come from environment variables
-and are never logged. See connectors/jira/REQUIREMENTS.md.
+Read-only. Uses only ``requests``. Credentials come from OCI Vault or
+environment variables and are never logged. See
+connectors/jira/REQUIREMENTS.md.
+
+HTTP retry/error handling and credential resolution live in the sibling
+``_shared`` package (``aidp_http.py``, ``aidp_secrets.py``), uploaded once to
+the same workspace folder — see connectors/jira/CLAUDE.md for the exact
+upload/``sys.path`` steps.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Iterator, Tuple
 from zoneinfo import ZoneInfo
 
+import aidp_http
+import aidp_secrets
+
 ENV_SITE = "JIRA_SITE"
 ENV_EMAIL = "JIRA_EMAIL"
 ENV_API_TOKEN = "JIRA_API_TOKEN"
 
-
-class JiraError(Exception):
-    """Any failure talking to Jira. Messages never contain credentials."""
-
-
-class JiraAuthError(JiraError):
-    """HTTP 401 or 403."""
-
-
-class JiraRateLimitError(JiraError):
-    """HTTP 429 persisted after the bounded number of retries."""
+# Re-exported under Jira-specific names for callers and this module's own
+# code; these are exactly aidp_http's generic classes/functions, not
+# subclasses or wrappers — every connector in this repo shares one engine.
+JiraError = aidp_http.ConnectorError
+JiraAuthError = aidp_http.ConnectorAuthError
+JiraRateLimitError = aidp_http.ConnectorRateLimitError
+MAX_BACKOFF_SECONDS = aidp_http.MAX_BACKOFF_SECONDS
+post_json = aidp_http.post_json
+get_json = aidp_http.get_json
+redact = aidp_http.redact
 
 
 def normalize_site(site: str) -> str:
@@ -42,14 +49,25 @@ def normalize_site(site: str) -> str:
 
 
 def credentials_from_env() -> Tuple[str, str, str]:
-    """Return ``(site, email, api_token)`` from the environment."""
-    missing = [n for n in (ENV_SITE, ENV_EMAIL, ENV_API_TOKEN) if not os.environ.get(n)]
+    """Return ``(site, email, api_token)``.
+
+    Resolved via OCI Vault first (if ``OCI_VAULT_ID`` is set), falling back to
+    plain environment variables — see ``connectors/_shared/aidp_secrets.py``.
+    Despite the name (kept for backward compatibility), this is no longer
+    environment-only.
+    """
+    values, missing = {}, []
+    for name in (ENV_SITE, ENV_EMAIL, ENV_API_TOKEN):
+        try:
+            values[name] = aidp_secrets.get_secret(name)
+        except KeyError:
+            missing.append(name)
     if missing:
         raise JiraError("missing environment variable(s): " + ", ".join(missing))
     return (
-        normalize_site(os.environ[ENV_SITE]),
-        os.environ[ENV_EMAIL],
-        os.environ[ENV_API_TOKEN],
+        normalize_site(values[ENV_SITE]),
+        values[ENV_EMAIL],
+        values[ENV_API_TOKEN],
     )
 
 
@@ -61,14 +79,6 @@ def jira_session(email: str, api_token: str):
     session.auth = (email, api_token)
     session.headers.update({"Accept": "application/json"})
     return session
-
-
-def redact(text: str, *secrets: str) -> str:
-    """Replace every non-empty secret in ``text`` with ``***``."""
-    for secret in secrets:
-        if secret:
-            text = text.replace(secret, "***")
-    return text
 
 
 _FORBIDDEN_IN_QUERY = re.compile(r"order\s+by", re.I)
@@ -97,7 +107,9 @@ def build_jql(*, since=None, until=None, query=None, tz=timezone.utc) -> str:
     if query and _FORBIDDEN_IN_QUERY.search(query):
         raise ValueError("query must not contain ORDER BY; paging adds its own ordering")
     parts = []
-    if query:
+    # query.strip() guards a whitespace-only query, which would otherwise
+    # produce a bare, invalid "()" clause after stripping.
+    if query and query.strip():
         parts.append("(%s)" % query.strip())
     if since is not None:
         parts.append('updated >= "%s"' % format_jql_timestamp(since, tz))
@@ -105,61 +117,6 @@ def build_jql(*, since=None, until=None, query=None, tz=timezone.utc) -> str:
         parts.append('updated <= "%s"' % format_jql_timestamp(until, tz))
     parts.append("ORDER BY updated ASC, key ASC")
     return " AND ".join(parts[:-1]) + (" " if parts[:-1] else "") + parts[-1]
-
-
-MAX_BACKOFF_SECONDS = 60.0
-
-
-def _retry_after_seconds(response, fallback: float) -> float:
-    value = response.headers.get("Retry-After")
-    try:
-        return min(max(float(value), 0.0), MAX_BACKOFF_SECONDS)
-    except (TypeError, ValueError):
-        return fallback
-
-
-def _request_json(make_request, *, max_retries=5, sleep=time.sleep) -> dict:
-    """Shared 429/auth/error/JSON handling for one GET or POST call."""
-    attempt = 0
-    while True:
-        response = make_request()
-        status = response.status_code
-        if status == 429:
-            if attempt >= max_retries:
-                raise JiraRateLimitError(
-                    "rate limited (HTTP 429) after {} retries".format(max_retries)
-                )
-            sleep(_retry_after_seconds(response, min(2 ** attempt, MAX_BACKOFF_SECONDS)))
-            attempt += 1
-            continue
-        if status in (401, 403):
-            raise JiraAuthError(
-                "HTTP {}: check the site, email and API token".format(status)
-            )
-        if status >= 400:
-            raise JiraError(
-                "HTTP {} from the Jira API: {}".format(status, _safe_body(response))
-            )
-        try:
-            return response.json()
-        except ValueError:
-            raise JiraError("response was not JSON; check the site name and URL") from None
-
-
-def post_json(session, url, body, *, timeout=60, max_retries=5, sleep=time.sleep) -> dict:
-    """POST ``body`` to ``url`` and return the parsed JSON, with bounded 429 retries."""
-    return _request_json(
-        lambda: session.post(url, json=body, timeout=timeout),
-        max_retries=max_retries, sleep=sleep,
-    )
-
-
-def get_json(session, url, *, timeout=60, max_retries=5, sleep=time.sleep) -> dict:
-    """GET ``url`` and return the parsed JSON, with the same retry/error handling as post_json."""
-    return _request_json(
-        lambda: session.get(url, timeout=timeout),
-        max_retries=max_retries, sleep=sleep,
-    )
 
 
 def account_timezone(session, site, *, timeout=60, max_retries=5, sleep=time.sleep) -> str:
@@ -177,13 +134,6 @@ def account_timezone(session, site, *, timeout=60, max_retries=5, sleep=time.sle
     if not tz_name:
         raise JiraError("account profile response has no timeZone field")
     return tz_name
-
-
-def _safe_body(response) -> str:
-    try:
-        return str(response.json())[:300]
-    except ValueError:
-        return "<non-JSON body>"
 
 
 MAX_PAGE_SIZE = 5000
