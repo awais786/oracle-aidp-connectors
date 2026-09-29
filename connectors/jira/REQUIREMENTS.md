@@ -1,7 +1,10 @@
 # Jira Cloud connector: requirements
 
-Status: draft, pending spike verification. Facts about Jira Cloud's API
-behaviour are unverified until the spike confirms them.
+Status: spike complete and verified live (2026-09-29, see `spike/RESULTS.md`);
+implementation complete and unit-tested (62 tests); a whole-branch review found
+and this document's requirements now reflect two fixes made after that review
+(F7's JSON fallback was unimplemented until the fix; F10 below is new). Task 8
+(live AIDP run) is still pending — see `live-results/RESULTS.md`.
 
 ## Goal
 
@@ -16,6 +19,11 @@ Jira's search endpoint, pagination and rate-limit behaviour themselves.
   token for the account (id.atlassian.com/manage/api-tokens).
 - G3. Oracle's AIDP connector documentation checked: no native Jira type. If
   one exists, the deliverable becomes a recipe for it and this file changes.
+  **Checked 2026-09-29** against Oracle's connectors plugin README and a web
+  search of the `aidataplatform` type list; neither includes Jira. Reasonably
+  confident but not certain — Oracle's own blog page on external connectors
+  could not be fetched directly to confirm against the canonical source. See
+  `spike/RESULTS.md`.
 
 ## Functional requirements
 
@@ -38,6 +46,13 @@ Jira's search endpoint, pagination and rate-limit behaviour themselves.
   paging supplies its own ordering.
 - F9. Clear errors for authentication failure, an unknown project/JQL syntax
   error, and a site that returns HTML instead of JSON.
+- F10. The watermark bounds sent in JQL are expressed in the searching
+  account's own timezone (`account_timezone()`, from `/rest/api/3/myself`),
+  not UTC. **Found necessary by a whole-branch review after the spike** — Jira
+  interprets JQL date-time literals in the account's timezone, and a UTC
+  literal against a non-UTC account silently skips or delays issues. A caller
+  who omits the timezone gets UTC bounds, which is only correct for a UTC
+  account.
 
 ## Non-functional requirements
 

@@ -138,19 +138,27 @@ live against a real site on 2026-09-29 (see `connectors/jira/spike/RESULTS.md`).
   scope here since this is a single organisation's own script against its own
   site. Verified live: a real API token was accepted on the first try, with no
   MFA or Basic-Auth restriction blocking it.
-- `search_issues(session, site, *, jql, fields, since, overlap_seconds, until,
-  page_size)`: a generator that pages via `nextPageToken` only (never an
-  offset), retries on HTTP 429 honouring `Retry-After`, and enforces a timeout.
-  Rejects a caller `jql` containing `ORDER BY`, since paging supplies its own
-  `ORDER BY updated ASC, key ASC`.
+- `account_timezone(session, site)`: the searching account's IANA timezone
+  name, from `GET /rest/api/3/myself`. Added after a whole-branch review — see
+  the timezone finding below.
+- `search_issues(session, site, *, query, fields, since, overlap_seconds,
+  until, page_size, tz_name)`: a generator that pages via `nextPageToken` only
+  (never an offset), retries on HTTP 429 honouring `Retry-After`, and enforces
+  a timeout. Rejects a caller `query` containing `ORDER BY`, since paging
+  supplies its own `ORDER BY updated ASC, key ASC`. `fields` defaults to every
+  `TYPED_FIELDS` column when omitted, not just `key`/`updated` — omitting it
+  used to silently null every other column (found by review, fixed).
 - Incremental loads: the JQL gains `updated >= "<lower>" AND updated <= "<T0>"`
-  ANDed onto the caller's filter — fix an upper bound per run, re-read a small
-  overlap on the next run's lower bound, de-duplicate by issue key. Jira's
-  `nextPageToken` is an opaque cursor Atlassian manages, not a value the caller
-  constructs, so there is no keyset-ordering problem to solve on the way in.
+  ANDed onto the caller's filter, expressed in the account's own timezone (see
+  below) — fix an upper bound per run, re-read a small overlap on the next
+  run's lower bound, de-duplicate by issue key. Jira's `nextPageToken` is an
+  opaque cursor Atlassian manages, not a value the caller constructs, so there
+  is no keyset-ordering problem to solve on the way in.
 - `to_dataframe(spark, rows)`: typed columns for common issue fields (`key`,
   `summary`, `status`, `priority`, `assignee`, `reporter`, `created`, `updated`,
-  `issuetype`, `project`).
+  `issuetype`, `project`), plus a trailing `raw_fields` JSON-string column
+  holding any other requested field (e.g. a custom field) rather than
+  silently dropping it — found missing by review, fixed.
 
 **Verified live (2026-09-29), see `connectors/jira/spike/RESULTS.md` and
 `connectors/jira/CLAUDE.md` for full detail:**
@@ -161,15 +169,22 @@ live against a real site on 2026-09-29 (see `connectors/jira/spike/RESULTS.md`).
 - A JQL query with no restricting clause is rejected outright — this connector
   never hits it, because `search_issues` always includes an `updated <=
   "<until>"` bound.
-- `updated`/`created` are returned in the requesting account's configured
-  timezone, not always UTC (observed `+0500`). The parser handles any offset
-  correctly.
-- Custom fields (`customfield_NNNNN`) are not in the typed output; requesting
-  one via `fields=` does not add a column. Documented as a v1 limitation, not
-  a defect blocking PASS.
 - No live 429 was triggered during testing; the retry path is verified only by
   offline unit tests. Rate-limit headers (`X-Ratelimit-Limit`/
   `X-Ratelimit-Remaining`) are present and decrement per request.
+
+**Timezone finding, corrected after a whole-branch review (2026-09-29).** The
+spike found `updated`/`created` are returned in the requesting account's
+configured timezone, not UTC (observed `+0500`), and originally concluded "no
+code change needed" — that only checked *reading* timestamps back. It missed
+that Jira also interprets the JQL date-time literals `search_issues` *sends*
+in that same account timezone, not UTC. Sending UTC-formatted bounds to a
+non-UTC account silently shifted the effective watermark by the account's
+offset — for an account behind UTC, this **permanently and silently skipped**
+issues updated in the gap. Fixed: `account_timezone()` plus a `tz`/`tz_name`
+parameter on `format_jql_timestamp`/`build_jql`/`search_issues`, which the
+notebook fetches once per run and passes explicitly. Omitting `tz_name`
+defaults to UTC, which is only correct for a UTC account.
 
 ## Testing
 
@@ -189,7 +204,13 @@ native `aidataplatform` type for this source? If yes, the deliverable becomes a
 tested recipe for that native type instead of a helper, and this spec is updated
 before any code is written.
 
-Jira Cloud (answered 2026-09-29, see `connectors/jira/spike/RESULTS.md`):
+Jira Cloud, native-type check (answered 2026-09-29, see
+`connectors/jira/spike/RESULTS.md`): no native Jira type found in Oracle's
+connectors plugin README or a general web search of the `aidataplatform` type
+list. Reasonably confident, not certain — Oracle's own blog page on external
+connectors could not be fetched directly to confirm.
+
+Jira Cloud, API spike (answered 2026-09-29, see `connectors/jira/spike/RESULTS.md`):
 1. Does `POST /rest/api/3/search/jql` behave as documented against a real site
    (JQL + fields in the body, `nextPageToken` in the response)? — Yes.
 2. What is the real maximum `maxResults`, and the rate-limit behaviour? —
@@ -208,10 +229,21 @@ as an assumption.
 0. Gates, checked before any code: a live AIDP workspace and cluster; a free
    Jira Cloud site (self-service at id.atlassian.com) and an API token
    (id.atlassian.com/manage/api-tokens).
-1. Repo scaffold: plugin manifests, README with disclaimer and license, test
-   harness. Done — commits on `main`.
+1. Repo scaffold: plugin manifests, README with disclaimer, test harness. Done
+   — commits on `main`. The licence itself is still an open item below; only
+   the disclaimer text is in place.
 2. Jira Cloud: spike (done, Proceed), helper, skill, example notebook (done,
-   unit-tested); live AIDP run and RESULTS row (pending AIDP workspace access).
+   62 unit tests). A whole-branch review before merge found three Critical
+   defects (fields defaulting to only `key`+`updated`, so the notebook loaded
+   mostly-null rows; JQL watermark bounds sent in UTC while Jira reads them in
+   the account's own timezone, which could silently skip issues; `pytest.ini`
+   pointing at a removed connector, breaking CI) plus several Important
+   findings (a real hostname committed against this repo's own rule; the
+   native-type gate never answered; custom fields silently dropped instead of
+   the documented JSON fallback). All fixed, each with a test written first;
+   the full suite and `claude plugin validate .` both pass after the fix pass.
+   Live AIDP run and RESULTS row (Task 8) still pending AIDP workspace access
+   — not claimed as PASS.
 3. Further connectors, chosen by demand from Arbisoft engineers and clients.
    Each follows the definition of done and gets its own spec section before it
    is built.

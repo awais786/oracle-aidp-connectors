@@ -18,9 +18,9 @@ before changing anything; it is the source of truth for scope and layout.
 ## Definition of done (every connector)
 
 Implemented, unit-tested offline, run against a real endpoint from a live AIDP
-workspace, recorded as a dated PASS in `tests/live-results/`, and documented with
-the AIDP-specific gotchas found. Without a live PASS it is experimental and is
-not listed as supported.
+workspace, recorded as a dated PASS in `connectors/<source>/live-results/`, and
+documented with the AIDP-specific gotchas found. Without a live PASS it is
+experimental and is not listed as supported.
 
 ## Rules
 
