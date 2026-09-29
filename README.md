@@ -8,7 +8,41 @@ Live-tested ingestion recipes for Oracle AI Data Platform (AIDP) Workbench, deli
 |---|---|
 | Jira Cloud | In development. Not listed as supported until a live PASS is recorded. |
 
-Design: `docs/specs/2026-09-28-oracle-aidp-connectors-design.md`. Development rules: `CLAUDE.md`.
+## Install as a Claude Code plugin
+
+From a local clone:
+
+```
+/plugin marketplace add /path/to/oracle-aidp-connectors
+/plugin install oracle-aidp-connectors@oracle-aidp-connectors
+```
+
+*(`claude plugin validate .` passes; the install flow itself is unverified —
+nobody has run it end to end yet.)*
+
+Then ask Claude, e.g. "load Jira issues updated since yesterday" — the
+`aidp-jira` skill routes the request. Each skill's own prerequisites (what to
+upload to the AIDP workspace, which environment variables or Vault secrets to
+set) are in `skills/aidp-<source>/SKILL.md`.
+
+## Layout
+
+```
+connectors/
+  _shared/      # cross-connector infra (HTTP retry, credentials, jar loading)
+  <source>/     # one connector: helper module, tests, example notebook,
+                # spike results, live-test results
+skills/         # one thin skill per connector, for plugin discovery
+docs/specs/     # the design this repo follows
+```
+
+## Docs
+
+- Design: `docs/specs/2026-09-28-oracle-aidp-connectors-design.md`
+- Development rules: `CLAUDE.md`
+- How to test, including a local Spark+Delta check that needs no AIDP access:
+  `TESTING.md`
+- Changelog: `CHANGELOG.md`
 
 Licence: not yet chosen. Do not redistribute until one is added.
 

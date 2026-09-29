@@ -8,6 +8,9 @@ Setup: see the skill `skills/aidp-jira/SKILL.md` and the example notebook in `ex
 Requirements and acceptance criteria: `REQUIREMENTS.md`. Verified API behaviour: `spike/RESULTS.md`.
 Live-test status: `live-results/RESULTS.md`. Not supported until a PASS row exists there.
 
+Running the live AIDP test yourself, or handing it to someone else? See
+[`LIVE_TEST_GUIDE.md`](LIVE_TEST_GUIDE.md) — self-contained, no other context needed.
+
 ## Test
 
     pip install -r ../../requirements-dev.txt
