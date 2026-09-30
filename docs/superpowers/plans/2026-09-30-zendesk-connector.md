@@ -49,7 +49,7 @@ connectors/zendesk/
   spike/probe.py                            # THROWAWAY, labelled as such
   spike/_env.py                             # THROWAWAY .env loader (handles '=' and quotes)
   spike/RESULTS.md                          # verified facts from the probe
-  tests/fakes.py                            # FakeResponse, FakeSession, FakeExport
+  tests/zendesk_fakes.py                    # FakeResponse, FakeSession, FakeExport
   tests/test_session.py
   tests/test_params.py
   tests/test_export.py
@@ -69,16 +69,16 @@ connectors/_shared/
 ### Task 1: Scaffold and connection basics
 
 **Files:**
-- Create: `connectors/zendesk/zendesk.py`, `connectors/zendesk/tests/fakes.py`, `connectors/zendesk/tests/test_session.py`
+- Create: `connectors/zendesk/zendesk.py`, `connectors/zendesk/tests/zendesk_fakes.py`, `connectors/zendesk/tests/test_session.py`
 
 **Interfaces:**
 - Consumes: `connectors/_shared/aidp_secrets.py::get_secret`.
 - Produces (in `zendesk.py`): `ZendeskError`, `ZendeskAuthError`, `ZendeskRateLimitError` (aliases of `aidp_http`'s `ConnectorError`/`ConnectorAuthError`/`ConnectorRateLimitError` — same classes, not subclasses, so a caller catching either name catches the same exception); `ENV_SUBDOMAIN`, `ENV_EMAIL`, `ENV_API_TOKEN` (str constants); `normalize_subdomain(subdomain: str) -> str`; `credentials_from_env() -> tuple[str, str, str]` returning `(subdomain, email, api_token)`; `zendesk_session(email: str, api_token: str) -> requests.Session`.
-- Produces (in `tests/fakes.py`): `FakeResponse(status=200, payload=None, headers=None)`, `FakeSession(responses)` with `.get(url, params=None, timeout=None)` popping scripted responses in order and recording `.calls` as dicts `{"url", "params", "timeout"}` — same shape as `connectors/_shared/tests/shared_fakes.py`, duplicated locally per this repo's existing per-connector test convention (see `connectors/jira/tests/fakes.py`).
+- Produces (in `tests/zendesk_fakes.py`): `FakeResponse(status=200, payload=None, headers=None)`, `FakeSession(responses)` with `.get(url, params=None, timeout=None)` popping scripted responses in order and recording `.calls` as dicts `{"url", "params", "timeout"}` — same shape as `connectors/_shared/tests/shared_fakes.py`, duplicated locally per this repo's existing per-connector test convention (see `connectors/jira/tests/fakes.py`).
 
 - [ ] **Step 1: Write the failing tests**
 
-`connectors/zendesk/tests/fakes.py`:
+`connectors/zendesk/tests/zendesk_fakes.py`:
 
 ```python
 """Test doubles for the Zendesk helper. No network, no Spark."""
@@ -646,16 +646,16 @@ Requires the Task 2 decision `Proceed`.
 
 **Files:**
 - Modify: `connectors/zendesk/zendesk.py`
-- Modify: `connectors/zendesk/tests/fakes.py` (add `FakeExport`)
+- Modify: `connectors/zendesk/tests/zendesk_fakes.py` (add `FakeExport`)
 - Create: `connectors/zendesk/tests/test_export.py`
 
 **Interfaces:**
 - Consumes: `build_export_params`, `MAX_PAGE_SIZE` (Task 3); `get_json` (Task 4, `_shared/aidp_http.py`); `normalize_subdomain`, `ZendeskError` (Task 1).
-- Produces: `export_tickets(session, subdomain, *, start_time=None, cursor=None, per_page=1000, timeout=60, max_retries=5, sleep=time.sleep) -> Iterator[dict]`. Exactly one of `start_time`/`cursor` required (validated by `build_export_params`). Yields each ticket dict from the `tickets` array across every page, stopping when `end_of_stream` is `true`. Also `FakeExport(pages, on_call=None)` in `tests/fakes.py`: a session double whose `.get()` ignores the request's params (paging correctness is tested here; param construction is tested in `test_params.py`) and serves pre-built response pages by call count, calling `on_call(call_number)` before serving each one.
+- Produces: `export_tickets(session, subdomain, *, start_time=None, cursor=None, per_page=1000, timeout=60, max_retries=5, sleep=time.sleep) -> Iterator[dict]`. Exactly one of `start_time`/`cursor` required (validated by `build_export_params`). Yields each ticket dict from the `tickets` array across every page, stopping when `end_of_stream` is `true`. Also `FakeExport(pages, on_call=None)` in `tests/zendesk_fakes.py`: a session double whose `.get()` ignores the request's params (paging correctness is tested here; param construction is tested in `test_params.py`) and serves pre-built response pages by call count, calling `on_call(call_number)` before serving each one.
 
 - [ ] **Step 1: Add `FakeExport` to the fakes**
 
-Append to `connectors/zendesk/tests/fakes.py`:
+Append to `connectors/zendesk/tests/zendesk_fakes.py`:
 
 ```python
 class FakeExport:
@@ -688,7 +688,7 @@ class FakeExport:
 import pytest
 
 import zendesk as z
-from fakes import FakeExport
+from zendesk_fakes import FakeExport
 
 
 def make_ticket(n):

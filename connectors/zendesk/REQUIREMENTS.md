@@ -1,9 +1,15 @@
 # Zendesk connector: requirements
 
-Status: scope approved 2026-09-30. Pre-spike — no code written yet. Every
-fact below is **unverified** (from Zendesk's public docs) unless marked
-otherwise; the spike (Task 2 of the implementation plan) must confirm each
-one before Task 3 is written, same discipline as the Jira connector.
+Status: scope approved 2026-09-30. Task 1 (credentials/session scaffolding)
+implemented and reviewed. Task 2 (the spike) is **blocked**: Zendesk has
+permanently blocked API-token creation for any account created on/after
+2026-07-28 (verified, see `connectors/zendesk/CLAUDE.md`), and all API
+tokens stop working everywhere by 2027-04-30 regardless — so F1's plain
+Basic-auth design below may need to become an OAuth `client_credentials`
+design instead. Tasks 3+ have not started. Every fact below is
+**unverified** (from Zendesk's public docs) unless marked otherwise; the
+spike (Task 2) must confirm each one before Task 3 is written, same
+discipline as the Jira connector.
 
 ## Goal
 
